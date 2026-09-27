@@ -1,0 +1,142 @@
+#!/bin/bash
+# The build reads the project's own packages from a copy of the project's APT
+# archive inside the build tree. This checks two things about that copy and
+# stops the build when either one is wrong:
+#
+#   1. the copy is the archive as it is right now, byte for byte;
+#   2. the build's apt can verify the copy, and is not being told not to.
+#
+# Why (1) is checked: fab stamps the bootstrap target, so a second build of
+# the same product reuses the bootstrap the first one made, copy of the
+# archive and all. On 2026-09-26 "make clean" failed on a busy deck, the
+# stamps survived, and the rebuild installed the packages the archive had held
+# that morning. The build said nothing, because every step of it succeeded.
+#
+# Why (2) is checked (tracker#7): the staging distribution was given its own
+# signing key and the build was never given the public half, while the source
+# entry said [trusted=yes]. So apt printed
+#
+#   W: OpenPGP signature verification failed: file:/srv/keel-apt/repo
+#      trixie-staging InRelease: Missing key 8CFD...090A
+#
+# and installed the project's packages unverified, which is a warning nobody
+# fails on. Now the keyring, the key in it, the signed-by option and the
+# absence of any trusted=yes are all checked here, and the copied InRelease is
+# verified with gpgv against that keyring before a package is installed from
+# it. gpgv rather than apt's word for it, so the tree that is about to be
+# configured is proved even at a step where no apt-get update runs.
+#
+#   keel-archive-check SOURCE_REPO TREE DIST ARCH [LABEL]
+#
+# SOURCE_REPO  the live archive on the build host, e.g. /srv/keel-apt/repo
+# TREE         the build tree that carries the copy under srv/keel-apt/repo
+# DIST         the distribution, e.g. trixie-staging
+# ARCH         the Debian architecture, e.g. amd64
+# LABEL        name of the build step, for the messages (default: TREE)
+#
+# Read from the environment, so the Makefile block stays one line per step:
+#
+# KEEL_ARCHIVE_KEY      fingerprint of the key that must sign the archive,
+#                       with no spaces. Required: a keyring is only a
+#                       promise until the key inside it is named.
+# KEEL_ARCHIVE_KEYRING  where in TREE the keyring is
+# KEEL_ARCHIVE_LIST     where in TREE the source entry is
+#
+# Exit 0 when everything holds, 1 otherwise.
+set -eu
+
+KEEL_ARCHIVE_KEY="${KEEL_ARCHIVE_KEY:-}"
+KEEL_ARCHIVE_KEYRING="${KEEL_ARCHIVE_KEYRING:-/etc/apt/keyrings/keel-staging-keyring.asc}"
+KEEL_ARCHIVE_LIST="${KEEL_ARCHIVE_LIST:-/etc/apt/sources.list.d/keel-staging.list}"
+
+usage() {
+    echo "usage: $(basename "$0") SOURCE_REPO TREE DIST ARCH [LABEL]" >&2
+    echo "environment: KEEL_ARCHIVE_KEY (required), KEEL_ARCHIVE_KEYRING, KEEL_ARCHIVE_LIST" >&2
+    exit 1
+}
+
+[ $# -ge 4 ] && [ $# -le 5 ] || usage
+source_repo=$1
+tree=$2
+dist=$3
+arch=$4
+label=${5:-$2}
+
+for value in "$source_repo" "$tree" "$dist" "$arch"; do
+    [ -n "$value" ] || usage
+done
+
+fatal() {
+    echo "FATAL [archive-check $label]: $*" >&2
+    exit 1
+}
+
+[ -n "$KEEL_ARCHIVE_KEY" ] \
+    || fatal "KEEL_ARCHIVE_KEY names no key: the archive would be verified against whatever the keyring happens to hold"
+
+index=dists/$dist/main/binary-$arch/Packages
+source_index=$source_repo/$index
+copy=$tree/srv/keel-apt/repo
+copy_index=$copy/$index
+keyring=$tree/$KEEL_ARCHIVE_KEYRING
+list=$tree/$KEEL_ARCHIVE_LIST
+inrelease=$copy/dists/$dist/InRelease
+
+# 1. The copy is the archive as it is right now.
+[ -f "$source_index" ] || fatal "the archive has no index at $source_index"
+[ -f "$copy_index" ] || fatal "the build tree has no archive index at $copy_index"
+
+if ! cmp -s "$source_index" "$copy_index"; then
+    echo "FATAL [archive-check $label]: $copy_index is not $source_index" >&2
+    diff -u "$copy_index" "$source_index" >&2 || true
+    echo "The build would install the packages the archive offered when this" >&2
+    echo "bootstrap was made, not the ones it offers now. Remove the build" >&2
+    echo "directory (or at least build/stamps/bootstrap) and build again." >&2
+    exit 1
+fi
+
+# 2. Nothing in the tree switches verification off. A single trusted=yes
+# anywhere turns every failure below into a warning, which is the defect this
+# check exists for, so it is refused wherever it is written, in either of the
+# two formats apt reads a source in.
+verification_off='trusted *= *yes|^ *Trusted: *yes'
+apt_sources="$tree/etc/apt/sources.list $tree/etc/apt/sources.list.d"
+# shellcheck disable=SC2086 # the two paths are one word each, on purpose
+untrusted=$(grep -rlE "$verification_off" $apt_sources 2>/dev/null || true)
+[ -z "$untrusted" ] \
+    || fatal "verification is switched off in: $(echo "$untrusted" | tr '\n' ' ')"
+
+# 3. The source entry names this distribution and the keyring it is verified
+# with. apt takes signed-by from the entry, so the entry is what decides
+# whether anything is verified at all.
+[ -f "$list" ] || fatal "the build tree has no source entry at $list"
+entry=$(grep -E "^[[:space:]]*deb[[:space:]]" "$list" | head -1)
+[ -n "$entry" ] || fatal "$list has no deb line"
+[[ "$entry" == *"signed-by=$KEEL_ARCHIVE_KEYRING"* ]] \
+    || fatal "$list does not name signed-by=$KEEL_ARCHIVE_KEYRING: $entry"
+# Padded with spaces on both sides so that trixie does not pass for the entry
+# of trixie-staging.
+[[ " $entry " == *" $dist "* ]] \
+    || fatal "$list does not name the distribution $dist: $entry"
+
+# 4. The keyring is there and holds the key that must have signed the archive.
+# A keyring that is present but holds the wrong key reads as a configured
+# build and fails only at apt, in a line that scrolls past.
+[ -s "$keyring" ] || fatal "$keyring is missing or empty: the build cannot verify the archive"
+gpg --batch --show-keys --with-colons "$keyring" 2>/dev/null \
+    | awk -F: -v want="$KEEL_ARCHIVE_KEY" '$1 == "fpr" && $10 == want { found = 1 } END { exit !found }' \
+    || fatal "$keyring does not hold key $KEEL_ARCHIVE_KEY"
+
+# 5. The signature on the copied index is good under that keyring. gpgv wants
+# a binary keyring, and dearmouring a public key needs no agent and no
+# network.
+[ -s "$inrelease" ] || fatal "$inrelease is missing or empty: this copy of the archive is not signed"
+binary_keyring=$(mktemp)
+trap 'rm -f "$binary_keyring"' EXIT
+if ! gpg --batch --dearmor < "$keyring" > "$binary_keyring" 2>/dev/null \
+    || ! gpgv --keyring "$binary_keyring" "$inrelease" >/dev/null 2>&1; then
+    fatal "the signature on $inrelease does not verify against $keyring"
+fi
+
+echo "[archive-check $label] $copy_index is the archive at $source_index"
+echo "[archive-check $label] $inrelease verifies against $KEEL_ARCHIVE_KEY, nothing is trusted unverified"
