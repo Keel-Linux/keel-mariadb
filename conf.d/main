@@ -1,11 +1,12 @@
 #!/bin/bash -ex
 # MariaDB, and nothing that serves a web page.
 #
-# common's conf/mysql has already run (COMMON_CONF of mk/turnkey/mysql.mk):
-# it installed mysqltuner, linked /etc/init.d/mysql to the mariadb script,
-# and removed the anonymous users, the remote root accounts and the test
-# database. Two things are left, and both are about the password a declared
-# instance hands to the database.
+# The conf script of the unit.d/mariadb component has already run (fab runs
+# the units after the common conf scripts and before this one): it installed
+# mysqltuner, linked /etc/init.d/mysql to the mariadb script, and removed the
+# anonymous users, the remote root accounts and the test database. Two things
+# are left, and both are about the password a declared instance hands to the
+# database.
 #
 # 1. The administrative account. Upstream creates it in conf/adminer-mysql,
 #    names it after Adminer, and the first boot hook that resets its

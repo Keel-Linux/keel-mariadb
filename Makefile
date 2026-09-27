@@ -4,15 +4,26 @@
 # other appliance that needs MariaDB is built on it instead of installing
 # its own.
 #
+#     git clone --branch v1.0.0 \
+#         https://github.com/keel-linux/unit-mariadb.git unit.d/mariadb
 #     bt-layer mariadb --parent core
 #
 # What it deliberately leaves out, and why, is in README.rst: Adminer needs
 # a web server, and which web server differs by context (lighttpd upstream,
 # Apache in LAMP), so it arrives with the web stack, not with the database.
+#
+# The server itself is not included from the shared tree any more. It is the
+# unit.d/mariadb component (keel-linux/unit-mariadb), which fab resolves and
+# applies on its own and bt-layer records in the layer manifest as
+# "units mariadb@<version>", so a layer built on this one applies it once and
+# a layer built on that one does not apply it again. Decision 0013 is why:
+# a database is a component, LAMP and LAPP share apache-php, and a database
+# that is a parent layer cannot be shared that way.
 
-include $(FAB_PATH)/common/mk/turnkey/mysql.mk
-
-# After mysql.mk, so a file of this overlay wins over the shared one.
+# The recipe's own overlay reaches the tree twice, here and again as
+# ROOT_OVERLAY after the units, so a file of this overlay still wins over a
+# file of the component. No path is in both today, and tests/unit.bats of
+# unit-mariadb lists what the component ships.
 COMMON_OVERLAYS += $(CURDIR)/overlay
 
 # Webmin comes from core and answers on 12321; plan/main adds the database

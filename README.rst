@@ -6,7 +6,18 @@ with TurnKey Linux appliances, and corresponding to the upstream appliance
 `turnkeylinux-apps/mysql <https://github.com/turnkeylinux-apps/mysql>`_ for
 the database half of what that appliance is::
 
+    git clone --branch v1.0.0 \
+        https://github.com/keel-linux/unit-mariadb.git unit.d/mariadb
     bt-layer mariadb --parent core
+
+The server comes from the ``unit.d/mariadb`` component, not from the shared
+tree: `keel-linux/unit-mariadb
+<https://github.com/keel-linux/unit-mariadb>`_ carries its plan, its overlay
+and its conf script, fab applies it, and ``bt-layer`` records it in the layer
+manifest as ``units mariadb@1.0.0``. Materialising ``unit.d`` from the pin is
+the assembly step decision 0010 names as work of the project and does not
+exist yet, so the clone above is that step for now; ``unit.d/`` is ignored by
+git here.
 
 It is a layer, not a product: LAMP and any other appliance that needs
 MariaDB is built on it, so the server is fetched, secured and measured
@@ -17,8 +28,8 @@ What is in it
 -------------
 
 ======================================  ====================================
-``Makefile``                            ``mk/turnkey/mysql.mk`` of ``common``, this overlay, the firewall ports
-``plan/main``                           ``turnkey/mysql`` (MariaDB, python3-pymysql, webmin-mysql), the client, the project packages
+``Makefile``                            the component under ``unit.d``, this overlay, the firewall ports
+``plan/main``                           the client and the project packages; MariaDB, python3-pymysql and webmin-mysql are the component's plan
 ``conf.d/main``                         the administrative account, created unusable; the checks; the project package upgrade
 ``overlay/etc/mysql/mariadb.conf.d/``   the bind addresses: ``::1`` and ``127.0.0.1``
 ``overlay/usr/lib/inithooks/``          the first boot hook, its library and its dialog

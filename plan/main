@@ -1,8 +1,9 @@
 #include <turnkey/base>
 
 /* MariaDB, python3-pymysql (bin/mysqlconf.py) and webmin-mysql, the module
-   that puts the database in the panel core already carries. */
-#include <turnkey/mysql>
+   that puts the database in the panel core already carries, are the plan of
+   the unit.d/mariadb component. fab resolves every unit's plan together with
+   this one, so they are not named here. */
 
 /* the command line client: the appliance talks to its own database over
    loopback, and the first boot hook proves the password it just set */
