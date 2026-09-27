@@ -142,25 +142,44 @@ check() {
     echo "deb [trusted=yes] file:///srv/keel-apt/repo $DIST main" > "$TREE$LIST_PATH"
     check bootstrap
     [ "$status" -eq 1 ]
-    [[ "$output" == *"verification is switched off in"* ]]
+    [[ "$output" == *"verification is switched off for /srv/keel-apt/repo"* ]]
     [[ "$output" == *"keel-staging.list"* ]]
 }
 
-@test "trusted=yes anywhere else in the tree fails too" {
-    printf 'deb [ trusted = yes ] http://example.invalid trixie main\n' \
+@test "trusted=yes on this archive in another file fails too" {
+    printf 'deb [ trusted = yes ] file:///srv/keel-apt/repo trixie-staging main\n' \
         > "$TREE/etc/apt/sources.list.d/other.list"
     check bootstrap
     [ "$status" -eq 1 ]
-    [[ "$output" == *"verification is switched off in"* ]]
+    [[ "$output" == *"verification is switched off for /srv/keel-apt/repo"* ]]
     [[ "$output" == *"other.list"* ]]
 }
 
-@test "Trusted: yes in a deb822 source fails as well" {
-    printf 'Types: deb\nURIs: http://example.invalid\nSuites: trixie\nTrusted: yes\n' \
+@test "Trusted: yes on this archive in a deb822 source fails as well" {
+    printf 'Types: deb\nURIs: file:///srv/keel-apt/repo\nSuites: trixie-staging\nTrusted: yes\n' \
         > "$TREE/etc/apt/sources.list.d/other.sources"
     check bootstrap
     [ "$status" -eq 1 ]
-    [[ "$output" == *"verification is switched off in"* ]]
+    [[ "$output" == *"verification is switched off for"* ]]
+}
+
+@test "the captured pool may say Trusted: yes, because it is not this archive" {
+    # Decision 0012: a file: index generated on this machine, whose digests
+    # keel-pool verify checks. Refusing it would fail every pinned build.
+    printf 'Types: deb\nURIs: file:/keel-pool\nSuites: 2026-09-27\nTrusted: yes\n' \
+        > "$TREE/etc/apt/sources.list.d/keel-pool.sources"
+    check bootstrap
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"nothing is trusted unverified"* ]]
+}
+
+@test "the archive a trusted=yes is refused for is overridable" {
+    printf 'deb [trusted=yes] file:///elsewhere/repo trixie main\n' \
+        > "$TREE/etc/apt/sources.list.d/other.list"
+    run env KEEL_ARCHIVE_KEY="$GOOD_KEY" KEEL_ARCHIVE_PATH=/elsewhere/repo \
+        "$CHECK" "$SOURCE" "$TREE" "$DIST" "$ARCH" bootstrap
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"switched off for /elsewhere/repo"* ]]
 }
 
 @test "a tree with no source entry at all fails" {
