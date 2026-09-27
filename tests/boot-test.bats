@@ -456,29 +456,58 @@ DEF
     run ! bt_parse_args mariadb --roles
     run ! bt_parse_args mariadb --nodes-lib
     run ! bt_parse_args mariadb --nodes-report
+    run ! bt_parse_args mariadb --keel-deb
 }
 
-# --- the replication phase, by hand -----------------------------------
-
-@test "repl_host_pattern: the /64 of a global address, as MariaDB writes it" {
-    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f)
-    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
-    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0::2)
-    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
+@test "parse_args: a locally built keel is off unless it is asked for" {
+    bt_parse_args mariadb
+    [ -z "$BT_KEEL_DEB" ]
+    bt_parse_args mariadb --keel-deb /root/src/keel_0.3.5_all.deb
+    [ "$BT_KEEL_DEB" = /root/src/keel_0.3.5_all.deb ]
 }
 
-@test "repl_host_pattern: refuses anything that is not a global IPv6" {
-    run bt_repl_host_pattern ::1
+@test "keel_deb_argv: installs by name inside the node, never by path" {
+    mapfile -t argv < <(bt_keel_deb_argv keel_0.3.5_all.deb)
+    [ "${argv[0]}" = dpkg ]
+    [ "${argv[1]}" = --install ]
+    [ "${argv[2]}" = /root/keel_0.3.5_all.deb ]
+}
+
+@test "keel_deb_argv: refuses anything that is not a package file name" {
+    run bt_keel_deb_argv ""
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a package file name"* ]]
+    run ! bt_keel_deb_argv /root/src/keel.deb
+    run ! bt_keel_deb_argv 'keel.deb; rm -rf /'
+}
+
+# --- the replication phase, driven by each node's description --------
+
+@test "repl_prefix: the /64 of a global address, as a description writes it" {
+    output=$(bt_repl_prefix fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f)
+    [ "$output" = 'fc42:5009:ba4b:5ab0::/64' ]
+    output=$(bt_repl_prefix fc42:5009:ba4b:5ab0::2)
+    [ "$output" = 'fc42:5009:ba4b:5ab0::/64' ]
+}
+
+@test "repl_prefix: refuses anything that is not a global IPv6" {
+    run bt_repl_prefix ::1
     [ "$status" -eq 1 ]
     [[ $output == *"is not a global IPv6 address to authorise"* ]]
-    run ! bt_repl_host_pattern 10.0.0.1
-    run ! bt_repl_host_pattern fe80::1
+    run ! bt_repl_prefix 10.0.0.1
+    run ! bt_repl_prefix fe80::1
 }
 
-@test "repl_host_pattern: refuses an address whose /64 is compressed away" {
-    run bt_repl_host_pattern "fc42::2"
+@test "repl_prefix: refuses an address whose /64 is compressed away" {
+    run bt_repl_prefix "fc42::2"
     [ "$status" -eq 1 ]
     [[ $output == *"no written out /64 prefix"* ]]
+}
+
+@test "repl_host_pattern: the /64 in MariaDB's own spelling, for one account" {
+    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f)
+    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
+    run ! bt_repl_host_pattern ::1
 }
 
 @test "is_sql_literal: a generated password, and nothing needing an escape" {
@@ -490,81 +519,106 @@ DEF
     ! bt_is_sql_literal 'two words'
 }
 
-@test "repl_cnf: the primary gets a server id, a bind list and a binary log" {
-    output=$(bt_repl_cnf primary 1 fc42:5009:ba4b:5ab0::1)
-    [[ $output == *"server_id = 1"* ]]
-    [[ $output == *"bind-address = ::1,127.0.0.1,fc42:5009:ba4b:5ab0::1"* ]]
-    [[ $output == *"skip_name_resolve = ON"* ]]
-    [[ $output == *"log_bin = mariadb-bin"* ]]
-    [[ $output == *"binlog_format = ROW"* ]]
+@test "repl_section: a primary authorises the peer's prefix, not its address" {
+    output=$(bt_repl_section primary fc42:5009:ba4b:5ab0::1 fc42:5009:ba4b:5ab0::2)
+    [[ $output == *"role: primary"* ]]
+    [[ $output == *'listen: ["::1", "127.0.0.1", "fc42:5009:ba4b:5ab0::1"]'* ]]
+    [[ $output == *'allowed_from: ["fc42:5009:ba4b:5ab0::/64"]'* ]]
+    [[ $output == *"file: /etc/keel/secrets/app_password"* ]]
+    [[ $output != *"primary:"*"host:"* ]]
 }
 
-@test "repl_cnf: the replica gets no binary log, because it reads one" {
-    output=$(bt_repl_cnf replica 2 fc42:5009:ba4b:5ab0::2)
-    [[ $output == *"server_id = 2"* ]]
-    [[ $output == *"bind-address = ::1,127.0.0.1,fc42:5009:ba4b:5ab0::2"* ]]
-    [[ $output != *"log_bin"* ]]
+@test "repl_section: a replica names the endpoint it replicates from" {
+    output=$(bt_repl_section replica fc42:5009:ba4b:5ab0::2 fc42:5009:ba4b:5ab0::1)
+    [[ $output == *"role: replica"* ]]
+    [[ $output == *'listen: ["::1", "127.0.0.1", "fc42:5009:ba4b:5ab0::2"]'* ]]
+    [[ $output == *'host: "fc42:5009:ba4b:5ab0::1"'* ]]
+    [[ $output == *"port: 3306"* ]]
+    [[ $output != *"allowed_from"* ]]
 }
 
-@test "repl_cnf: refuses a role, a server id or an address it cannot use" {
-    run bt_repl_cnf arbiter 1 fc42::1
+@test "repl_section: refuses a role or an address it cannot describe" {
+    run bt_repl_section arbiter fc42:5009:ba4b:5ab0::1 fc42:5009:ba4b:5ab0::2
     [ "$status" -eq 1 ]
     [[ $output == *"is neither primary nor replica"* ]]
-    run bt_repl_cnf primary 0 fc42::1
+    run bt_repl_section primary ::1 fc42:5009:ba4b:5ab0::2
     [ "$status" -eq 1 ]
-    [[ $output == *"is not a server id"* ]]
-    run bt_repl_cnf primary 1 ::1
-    [ "$status" -eq 1 ]
-    [[ $output == *"is not a global IPv6 address to listen on"* ]]
+    [[ $output == *"need global IPv6 addresses"* ]]
+    run ! bt_repl_section replica fc42:5009:ba4b:5ab0::1 ::1
 }
 
-@test "repl_account_sql: idempotent, and the grant is one of two" {
-    output=$(bt_repl_account_sql repl 'fc42:5009:ba4b:5ab0:%' 'REPLICATION SLAVE' secret1)
-    [[ $output == *"CREATE USER IF NOT EXISTS 'repl'@'fc42:5009:ba4b:5ab0:%'"* ]]
-    [[ $output == *"ALTER USER 'repl'@'fc42:5009:ba4b:5ab0:%' IDENTIFIED BY 'secret1'"* ]]
-    [[ $output == *"GRANT REPLICATION SLAVE ON *.* TO 'repl'@'fc42:5009:ba4b:5ab0:%'"* ]]
-    [[ $output == *"FLUSH PRIVILEGES"* ]]
-    output=$(bt_repl_account_sql admin 'fc42:%' 'ALL PRIVILEGES' secret2)
-    [[ $output == *"GRANT ALL PRIVILEGES ON *.* TO 'admin'@'fc42:%'"* ]]
+@test "apply_verdict: exit 0 converged, a refusal is quoted, anything else fails" {
+    run bt_apply_verdict 0 "database.server: done"
+    [ "$status" -eq 0 ]
+    [[ $output == *"converged the declared role"* ]]
+    run bt_apply_verdict 16 "x: refused: it holds operatordata"
+    [ "$status" -eq 1 ]
+    [[ $output == *"keel refused: it holds operatordata"* ]]
+    run bt_apply_verdict 15 "must run as root"
+    [ "$status" -eq 1 ]
+    [[ $output == *"failed with exit 15"* ]]
 }
 
-@test "repl_account_sql: refuses a value that would need escaping" {
-    run bt_repl_account_sql "rep'l" 'fc42:%' 'ALL PRIVILEGES' secret
+@test "refusal_verdict: the refusal is what is being proved" {
+    run bt_refusal_verdict 16 "x: refused: this server holds operatordata"
+    [ "$status" -eq 0 ]
+    [[ $output == *"refused to replace the database this server holds"* ]]
+}
+
+@test "refusal_verdict: a run that went ahead is the failure" {
+    run bt_refusal_verdict 0 "database.server.replication.primary: done"
+    [ "$status" -eq 1 ]
+    [[ $output == *"it must refuse"* ]]
+}
+
+@test "refusal_verdict: a refusal about something else is not this one" {
+    run bt_refusal_verdict 16 "x: refused: no machine-id"
+    [ "$status" -eq 1 ]
+    [[ $output == *"said nothing about operatordata"* ]]
+}
+
+@test "dropin_verdict: the primary has a binary log and the replica has none" {
+    run bt_dropin_verdict primary "server_id = 7
+log_bin = mariadb-bin"
+    [ "$status" -eq 0 ]
+    [[ $output == *"binary log a replica can read"* ]]
+    run bt_dropin_verdict replica "server_id = 8"
+    [ "$status" -eq 0 ]
+    [[ $output == *"needs no binary log of its own"* ]]
+}
+
+@test "dropin_verdict: a missing server id, log or an extra one all fail" {
+    run bt_dropin_verdict primary "bind-address = ::1"
+    [ "$status" -eq 1 ]
+    [[ $output == *"names no server id"* ]]
+    run bt_dropin_verdict primary "server_id = 7"
+    [ "$status" -eq 1 ]
+    [[ $output == *"has no binary log"* ]]
+    run bt_dropin_verdict replica "server_id = 8
+log_bin = mariadb-bin"
+    [ "$status" -eq 1 ]
+    [[ $output == *"given a binary log it does not need"* ]]
+}
+
+@test "repl_admin_sql: idempotent, and refuses a value needing an escape" {
+    output=$(bt_repl_admin_sql admin 'fc42:5009:ba4b:5ab0:%' secret1)
+    [[ $output == *"CREATE USER IF NOT EXISTS 'admin'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    [[ $output == *"ALTER USER 'admin'@'fc42:5009:ba4b:5ab0:%' IDENTIFIED BY 'secret1'"* ]]
+    [[ $output == *"GRANT SELECT ON keeltest.* TO 'admin'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    # Never ALL: it carries Repl_slave_priv, which makes the machine a
+    # primary in the server's own eyes and in what keel inspect reads.
+    [[ $output != *"ALL PRIVILEGES"* ]]
+    run bt_repl_admin_sql "adm'in" 'fc42:%' secret
     [ "$status" -eq 1 ]
     [[ $output == *"needs a plain user, host and password"* ]]
-    run ! bt_repl_account_sql repl "" 'ALL PRIVILEGES' secret
-    run ! bt_repl_account_sql repl 'fc42:%' 'ALL PRIVILEGES' "pass word"
+    run ! bt_repl_admin_sql admin 'fc42:%' "pass word"
 }
 
-@test "repl_account_sql: refuses a grant this test does not make" {
-    run bt_repl_account_sql repl 'fc42:%' 'SUPER' secret
-    [ "$status" -eq 1 ]
-    [[ $output == *"is not a grant this test makes"* ]]
-}
-
-@test "repl_start_sql: GTID, an unbracketed literal and a fresh position" {
-    output=$(bt_repl_start_sql repl secret fc42:5009:ba4b:5ab0::1 3306)
-    [[ $output == *"STOP SLAVE;"* ]]
-    [[ $output == *"SET GLOBAL gtid_slave_pos = '';"* ]]
-    [[ $output == *"MASTER_HOST='fc42:5009:ba4b:5ab0::1', MASTER_PORT=3306"* ]]
-    [[ $output == *"MASTER_USER='repl', MASTER_PASSWORD='secret'"* ]]
-    [[ $output == *"MASTER_USE_GTID=slave_pos"* ]]
-    [[ $output == *"START SLAVE;"* ]]
-}
-
-@test "repl_start_sql: refuses a bad account, address or port" {
-    run bt_repl_start_sql "re'pl" secret fc42::1 3306
-    [ "$status" -eq 1 ]
-    [[ $output == *"needs a plain user and password"* ]]
-    run bt_repl_start_sql repl "pass word" fc42::1 3306
-    [ "$status" -eq 1 ]
-    [[ $output == *"needs a plain user and password"* ]]
-    run bt_repl_start_sql repl secret ::1 3306
-    [ "$status" -eq 1 ]
-    [[ $output == *"is not a global IPv6 address to replicate from"* ]]
-    run bt_repl_start_sql repl secret fc42::1 threethousand
-    [ "$status" -eq 1 ]
-    [[ $output == *"is not a port"* ]]
+@test "held_db_sql: the database the operator must be warned about" {
+    output=$(bt_held_db_sql)
+    [[ $output == *"CREATE DATABASE IF NOT EXISTS operatordata;"* ]]
+    output=$(bt_drop_held_db_sql)
+    [[ $output == *"DROP DATABASE IF EXISTS operatordata;"* ]]
 }
 
 @test "repl_write_sql: one row, with the marker of this run" {

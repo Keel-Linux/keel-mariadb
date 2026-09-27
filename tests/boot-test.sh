@@ -12,13 +12,15 @@
 # installed and Webmin answers over IPv6 on 12321.
 #
 # With --roles it does all of the above on one container per role, on the
-# same bridge, and then runs the replication phase: it configures the
-# primary and the replica by hand, writes a row on the primary and reads the
-# same row from the replica over IPv6. That phase is the gate proving it can
-# see replication work; it is not the appliance's replication feature.
-# Handbook decision 0013 makes a test like it the condition for building
-# one. What in it is hand configuration, and who will own each piece, is
-# listed in tests/README.md.
+# same bridge, and then runs the replication phase. That phase configures
+# nothing by hand: it writes each node's role into that node's own instance
+# description and runs `keel spec apply --system-only`, which is what the
+# console's Primary and Replica screens call, and then asserts the outcome.
+# It also proves the refusal, on a real server: a replica that would replace
+# a database the operator put there is declined and nothing is changed.
+# Handbook decision 0013 made a test like this the condition for building
+# the feature at all; tests/README.md lists what is left of hand
+# configuration, which is one account row that is not part of the feature.
 #
 # Called by the reusable workflow test-appliance.yml after keel pull and
 # keel verify; runnable by hand as root on any host with LXC, see
@@ -247,6 +249,19 @@ for ((i = 0; i < node_count; i++)); do
     log "first boot of ${names[i]} finished; ssh root@${addrs[i]}"
 done
 
+# A keel no published layer carries yet (--keel-deb). The gate never
+# passes it: there the keel under test is the one the layer carries. The
+# first boot has already run, and it converged a description with no
+# database section, so nothing it did depended on which keel this is.
+if [ -n "$BT_KEEL_DEB" ]; then
+    mapfile -t install_keel < <(bt_keel_deb_argv "$(basename "$BT_KEEL_DEB")")
+    for container in "${names[@]}"; do
+        install -m 0644 "$BT_KEEL_DEB" "$(node_rootfs "$container")/root/"
+        lxc attach "$container" -- "${install_keel[@]}"
+        log "$container: $(lxc attach "$container" -- keel --version)"
+    done
+fi
+
 # --- 7. what every node is, checked on every node ---------------------
 code=""
 webmin_answers() {
@@ -297,38 +312,83 @@ if [ -z "$BT_ROLES" ]; then
     exit 0
 fi
 
-# --- 8. the replication phase -----------------------------------------
+# --- 8. the replication phase, configured by keel from the descriptions
 #
-# From here on the test configures the machines by hand. None of it ships
-# and none of it is the appliance's replication feature: it is the gate
-# showing that such a feature can be proved here, which decision 0013 makes
-# the condition for building one. tests/README.md lists each piece and who
-# will own it. btn_role_node refuses a role two nodes share, so this phase
-# says out loud that it is about a pair; the machinery under it is not.
+# Nothing here writes a MariaDB setting, creates an account or issues a
+# CHANGE MASTER. The test writes each node's role into that node's own
+# instance description and runs `keel spec apply --system-only` on it,
+# which is what the console's Primary and Replica screens do. What is
+# asserted afterwards is the outcome: what the servers say they are, and a
+# row written on one turning up on the other.
 primary=$(btn_role_node "$topology" "$BT_ROLE_PRIMARY")
 replica=$(btn_role_node "$topology" "$BT_ROLE_REPLICA")
 primary_addr=$(node_addr "$primary")
 replica_addr=$(node_addr "$replica")
-primary_prefix=$(bt_repl_host_pattern "$primary_addr")
-replica_prefix=$(bt_repl_host_pattern "$replica_addr")
+primary_pattern=$(bt_repl_host_pattern "$primary_addr")
 log "replication phase: primary $primary [$primary_addr], replica $replica [$replica_addr]"
 
-# 8a. A server id, a bind address that adds this node's own literal global
-#     address to the loopback pair the layer ships, and a binary log on the
-#     primary. None of the three is settable at runtime, so each node is
-#     restarted once.
-for container in "$primary" "$replica"; do
+apply_output=""
+apply_code=0
+apply_node() {
+    # apply_node NAME: converge that node's description from the machine
+    # itself, the way the first boot hook and the console both do. The
+    # output and the exit code go in apply_output and apply_code, because
+    # a refusal is one of the things this phase asserts and a refusal is
+    # a non zero exit under `set -e`.
+    apply_code=0
+    set +e
+    apply_output=$(lxc attach "$1" -- \
+        keel spec apply --system-only --non-interactive 2>&1)
+    apply_code=$?
+    set -e
+    printf '%s\n' "$apply_output"
+}
+
+# 8a. Each node's description gains its own database.server section: its
+#     role, the addresses it answers on, and either the prefix it
+#     authorises (primary) or the endpoint it replicates from (replica).
+#     Written into both paths the first boot reads, so the description on
+#     the machine is the description keel acts on.
+for pair in "$primary $replica" "$replica $primary"; do
+    read -r container peer <<< "$pair"
     rootfs=$(node_rootfs "$container")
-    bt_repl_cnf "$(node_role "$container")" "$(node_index "$container")" \
-        "$(node_addr "$container")" > "$rootfs/$BT_REPL_CNF"
-    chmod 0644 "$rootfs/$BT_REPL_CNF"
-    log "$container: $(node_role "$container"), server_id $(node_index "$container"), also listening on [$(node_addr "$container")]"
-    lxc attach "$container" -- systemctl restart mariadb
+    section=$(bt_repl_section "$(node_role "$container")" \
+        "$(node_addr "$container")" "$(node_addr "$peer")")
+    for target in $(bt_spec_targets "$rootfs"); do
+        printf '\n%s\n' "$section" >> "$target"
+    done
+    log "$container: description now declares $(node_role "$container")"
 done
 
-# 8b. Each node's database answers from the other one, over IPv6, at a
-#     literal address. This is the wait the whole gate exists for: until it
-#     passes, nothing about a pair of machines can be asserted at all.
+# 8b. The refusal, proved on a real server before anything is configured.
+#     The replica is given a database of its own first. Becoming a replica
+#     replaces it, so keel must refuse and change nothing; this is the one
+#     property of the feature that loses data if it is wrong, and decision
+#     0013 is the reason it is asserted here and not only in unit tests.
+bt_held_db_sql | lxc attach "$replica" -- mysql
+log "$replica: holds the database $BT_REPL_HELD_DB, which a replica would replace"
+apply_node "$replica"
+bt_refusal_verdict "$apply_code" "$apply_output"
+still=$(lxc attach "$replica" -- mysql --batch --skip-column-names \
+    --execute="$BT_REPL_RUNNING_QUERY" | awk 'NR == 1 { print $2 }')
+if [ "$still" = "$BT_REPL_RUNNING_ANSWER" ]; then
+    echo "boot-test: the refused run started replication anyway" >&2
+    exit 1
+fi
+log "$replica: nothing was configured, $BT_REPL_HELD_DB is untouched"
+bt_drop_held_db_sql | lxc attach "$replica" -- mysql
+
+# 8c. The primary first: it must hold its authorization and its binary log
+#     before the replica connects.
+apply_node "$primary"
+bt_apply_verdict "$apply_code" "$apply_output"
+dropin=$(lxc attach "$primary" -- cat "/$BT_REPL_CNF")
+printf '%s\n' "$dropin"
+bt_dropin_verdict "$BT_ROLE_PRIMARY" "$dropin"
+
+# 8d. Each node's database answers from the other one, over IPv6, at a
+#     literal address. Until this passes, nothing about a pair of machines
+#     can be asserted at all.
 for pair in "$primary $replica $replica_addr" "$replica $primary $primary_addr"; do
     read -r from to to_addr <<< "$pair"
     mapfile -t probe < <(btn_tcp_probe_argv "$to_addr" "$BT_DB_PORT")
@@ -338,31 +398,24 @@ for pair in "$primary $replica $replica_addr" "$replica $primary $primary_addr";
     log "$from reaches $to on [$to_addr]:$BT_DB_PORT"
 done
 
-# 8c. The accounts. Both are created through the unix socket inside the
-#     container, which is how an appliance administers its own database, and
-#     both are authorised for the other node's /64 rather than its single
-#     address: decision 0013 records that a prefix is stable with IPv6 and
-#     no NAT while a list of addresses goes stale on every rebuild. The
-#     statements arrive on standard input, so no password reaches a process
-#     list.
-#
-#     On the primary, the replication account, with the password the
-#     description declares as secrets.app_password. On the replica, a host
-#     row for the administrative account with secrets.db_password, so the
-#     proof below is read from the other machine by a declared account and
-#     not by anything this test invented.
-bt_repl_account_sql "$BT_REPL_USER" "$replica_prefix" \
-    'REPLICATION SLAVE' "$repl_password" | lxc attach "$primary" -- mysql
-log "$primary: replication account '$BT_REPL_USER'@'$replica_prefix' created"
-bt_repl_account_sql "$BT_DB_USER" "$primary_prefix" \
-    'ALL PRIVILEGES' "$declared_password" | lxc attach "$replica" -- mysql
-log "$replica: '$BT_DB_USER'@'$primary_prefix' may read it"
-
-# 8d. Make the replica a replica, with GTID, then ask the server what it
-#     thinks it is rather than reading the configuration back. Asserting
-#     the configuration is not asserting the behaviour (docs/traps.md).
-bt_repl_start_sql "$BT_REPL_USER" "$repl_password" "$primary_addr" "$BT_DB_PORT" \
+# 8e. A host row for the administrative account on the replica. The one
+#     piece of hand configuration left, and it is not part of the feature:
+#     it exists only so the proof below can be read from the other machine
+#     by an account the description declares.
+bt_repl_admin_sql "$BT_DB_USER" "$primary_pattern" "$declared_password" \
     | lxc attach "$replica" -- mysql
+log "$replica: '$BT_DB_USER'@'$primary_pattern' may read it"
+
+# 8f. Now the replica, over a database that holds nothing.
+apply_node "$replica"
+bt_apply_verdict "$apply_code" "$apply_output"
+dropin=$(lxc attach "$replica" -- cat "/$BT_REPL_CNF")
+printf '%s\n' "$dropin"
+bt_dropin_verdict "$BT_ROLE_REPLICA" "$dropin"
+
+# 8g. Ask the servers what they are, rather than reading back the files
+#     keel wrote (docs/traps.md, "asserting the configuration is not
+#     asserting the behaviour").
 running=""
 replication_running() {
     running=$(lxc attach "$replica" -- mysql --batch --skip-column-names \
@@ -373,7 +426,23 @@ bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" "$replica to report replication running
     replication_running
 bt_repl_running_verdict "$running"
 
-# 8e. Write on the primary, read on the replica. The value is generated on
+granted=$(lxc attach "$primary" -- mysql --batch --skip-column-names \
+    --execute="SELECT Host FROM mysql.user WHERE User = '$BT_REPL_USER'")
+log "$primary: '$BT_REPL_USER' is granted from $(printf '%s' "$granted" | tr '\n' ' ')"
+
+# 8h. No drift on either node: the description says what the machines are,
+#     which is the whole claim of this phase. It runs here and not before,
+#     because before the apply the descriptions declared a role neither
+#     machine was in yet.
+for container in "$primary" "$replica"; do
+    set +e
+    lxc attach "$container" -- keel diff
+    diff_code=$?
+    set -e
+    bt_diff_verdict "$diff_code"
+done
+
+# 8i. Write on the primary, read on the replica. The value is generated on
 #     the host for this run alone, written on one machine by the
 #     administrative account with its declared password and read back from
 #     the other machine over IPv6, so the same value appearing there can

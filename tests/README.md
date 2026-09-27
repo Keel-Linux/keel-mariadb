@@ -66,6 +66,12 @@ options are `--bridge`, `--cache-dir`, `--lxc-path`, `--name`, `--timeout`
 and `--keep` (leaves the container running; then `lxc-attach -n <name>`).
 `tests/boot-test.sh --help` lists them all.
 
+`--keel-deb FILE` installs a locally built keel into every node once it has
+booted. The gate never passes it: there the keel under test is the one the
+published layer carries, which is the point of assembling a published layer.
+It is for the maintainer proving a keel before the layer that carries it is
+published, which is the order the replication feature had to be done in.
+
 What it does, in order:
 
 1. `keel pull` and `keel assemble` the chain (core, mariadb) into
@@ -129,35 +135,54 @@ gets `/etc/keel/peers.env` with every node's literal IPv6 address. The test
 addresses the other node by that literal address and never by a name, because
 on Debian a name resolves to IPv4 alone.
 
-### What the phase does, and who owns each piece later
+### keel configures it, and the test asserts the outcome
 
-The phase exists because handbook decision 0013 says the console's
-replication modes should not be built if they cannot be tested in the gate.
-It is therefore deliberately hand configuration, and every piece of it is
-something the appliance will own:
+This phase used to configure the two machines by hand, and that table has
+been emptied by keel-mariadb#9: what was hand configuration is now what
+`keel spec apply --system-only` does from `database.server`, which is what
+the console's Primary and Replica screens call.
 
-| Done by hand here | Owner once the console has the modes |
+| Was done by hand | Owner now |
 | --- | --- |
-| `/etc/keel/node.env`, the role | the instance description (decision 0013, phase 2) |
-| the drop-in `zz-keel-boot-test-replication.cnf`: `server_id`, `bind-address` with this node's own literal global address, `skip_name_resolve`, and `log_bin` on the primary alone | the Primary and Replica screens |
-| the replication account, authorised for the peer's /64 rather than one address | the Primary screen, which is what "a primary holds authorizations" means |
-| a host row for the administrative account on the replica | nobody: it exists only so the row can be read from the other machine by a declared account |
-| `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos` and `START SLAVE` | the Replica screen |
-| an empty `gtid_slave_pos`, meaning "from the start of the primary's log" | the Replica screen's seeding step, which will be a backup of the primary |
+| `/etc/keel/node.env`, the role | still the test's, and still how a node learns which one it is; it decides which section is written into that node's description |
+| the drop-in: `server_id`, `bind-address`, `skip_name_resolve`, `log_bin` on the primary | `keel spec apply --system-only`, from `listen` and `role`. The test reads the file back and never writes it |
+| the replication account, authorised for the peer's /64 | `keel`, from `replication.allowed_from`. The description carries the `/64`, and keel writes the host pattern MariaDB holds |
+| `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos` and `START SLAVE` | `keel`, from `replication.primary` |
+| an empty `gtid_slave_pos` | `keel`, and only over a database that holds nothing, which is why the refusal below is asserted first |
+| a host row for the administrative account on the replica | still the test's, and not part of the feature: it exists only so the row can be read from the other machine by a declared account. `SELECT` on the one database and never `ALL PRIVILEGES`, which carries `Repl_slave_priv` and would make the replica read as a primary |
 
-In order: the drop-in and a restart on both; each node's database confirmed
-reachable from the other over IPv6; the accounts; `START SLAVE`; the server
-asked what it thinks it is (`Slave_running`, not the configuration read
-back); then a value generated on the host for this run, written on the
-primary and read from the replica **from the primary container** over IPv6.
-The same value appearing there can only mean replication carried it.
+What the test writes is a **description**, appended to `tests/instance.yaml`
+in each node's own rootfs once the addresses exist: its role, the addresses
+it answers on, and either the prefix it authorises or the endpoint it
+replicates from. Nothing in it configures the other machine.
 
-`keel diff` runs before the phase on purpose: the drop-in is drift the
-description says nothing about, which is the class of problem decision 0013
-lists under promotion.
+In order:
+
+1. each node's description gains its `database.server` section;
+2. **the refusal, on a real server.** The replica is given a database of its
+   own, `operatordata`, and told to become a replica. keel must exit 16, say
+   what it refused, and leave replication stopped. Becoming a replica
+   replaces the local database, and it is the one property of this feature
+   that loses data if it is wrong, so the gate asserts it and not only the
+   unit tests. The database is then dropped;
+3. the primary converges, and its drop-in is read back: a server id and a
+   binary log;
+4. each node's database confirmed reachable from the other over IPv6;
+5. the administrative host row on the replica;
+6. the replica converges, and its drop-in is read back: a server id and no
+   binary log, because it reads the primary's;
+7. the server is asked what it thinks it is (`Slave_running`, not the
+   configuration read back), and the primary is asked what it granted;
+8. **`keel diff` on both nodes, with no drift.** It runs here and no longer
+   before the phase: the machines are now what their descriptions say, which
+   is the whole claim. Before the apply they were not;
+9. a value generated on the host for this run, written on the primary and
+   read from the replica **from the primary container** over IPv6. The same
+   value appearing there can only mean replication carried it.
 
 `secrets.app_password` in `tests/instance.yaml` is the replication
-credential. It is declared rather than invented in the test because the point
-is that a replication password arrives the way the administrative one does.
-No hook on this layer reads `APP_PASS`, and `keel diff` never compares secret
-values, so a single node run is unaffected.
+credential, and `database.server.replication.secret` names its file. It is
+declared rather than invented in the test because the point is that a
+replication password arrives the way the administrative one does. No hook on
+this layer reads `APP_PASS`, and `keel diff` never compares secret values, so
+a single node run is unaffected.
