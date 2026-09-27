@@ -53,6 +53,16 @@ jobs:
       parent: core
       timeout: 60
   package:
+    # Only on a pull request. require-changelog compares the two commits of
+    # the pull request, which it reads from
+    # github.event.pull_request.base.sha; outside a pull request that is
+    # empty and the script is handed one argument instead of two, so every
+    # push to main failed the check. The keel repository already gates it
+    # this way. A job whose condition is false is reported as skipped,
+    # which satisfies a required status, so protection keeps working and
+    # the check is still a real run on the pull request itself, which is
+    # the only place it can say anything.
+    if: github.event_name == 'pull_request'
     # This recipe has no debian/changelog: what bt-layer records in the
     # manifest is the top entry of ./changelog, which is also what
     # make-release-deb.py turns into the release package. So that is the
