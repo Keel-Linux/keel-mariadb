@@ -33,6 +33,16 @@ secrets:
   # firstboot.d/35mysqlpass reads and hands to bin/mysqlconf.py.
   db_password:
     file: /etc/keel/secrets/db_password
+  # The replication credential of the two node phase of the boot test. No
+  # hook on this layer reads APP_PASS, so on a single node run it is a
+  # declared secret nothing consumes, which keel diff does not compare
+  # because values are never read on either side. It is declared here, and
+  # not invented inside the test, because the point of the phase is that a
+  # replication account gets its password from the instance description the
+  # same way the administrative account does. When the appliance owns
+  # replication this is the field its own screen will fill.
+  app_password:
+    file: /etc/keel/secrets/app_password
 
 app:
   options:

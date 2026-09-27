@@ -10,13 +10,13 @@ LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 | --- | --- | --- | --- |
 | overlay/usr/lib/inithooks/lib/mariadb.sh | tests/mariadb.bats (13 tests) | 100 percent (43/43) under kcov | every function and every branch |
 | overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (12 tests) | 95.45 percent (21/22) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
-| tests/lib/boot-test-lib.sh | tests/boot-test.bats (43 tests) | 100 percent (153/153) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts |
+| tests/lib/boot-test-lib.sh | tests/boot-test.bats (67 tests) | 100 percent (248/248) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts, the node options, and the replication phase's drop-in, accounts, statements and verdicts |
 | overlay/usr/lib/inithooks/bin/dbpass.py | none | 0 | dialog wrapper, only reached with a terminal attached |
 | conf.d/main | the build | integration only | build time script, 0004 pragmatic limits |
 | tests/boot-test.sh | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the three measured shell files: **99.54 percent (217/218)**,
-68 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
+Total over the three measured shell files: **99.68 percent (312/313)**,
+92 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
 the workflow sets to 95, the lowest measured file. It is only ever raised
 (decision 0006).
 
@@ -24,7 +24,12 @@ the workflow sets to 95, the lowest measured file. It is only ever raised
     kcov line coverage (threshold 95 percent):
      100.00  43/43  mariadb.sh
       95.45  21/22  35mysqlpass
-     100.00  153/153  boot-test-lib.sh
+     100.00  248/248  boot-test-lib.sh
+
+The topology of a run with several nodes is not measured here because it is
+not here: `lib/boot-test-nodes.sh` of `keel-linux/.github` holds it, at 113
+of 113 lines and 39 bats tests in that repository, which is where the shell
+the reusable workflows lend out is tested.
 
 ## What the hook tests cover
 
@@ -49,8 +54,30 @@ before any password is set.
 `appliance / build-and-boot` runs through the organization's
 `test-appliance.yml` on the self-hosted `keel-lxc` runner, which fetches
 the published layer from `https://mirror.keellinux.org/layers`, verifies
-it, assembles it, boots it in LXC and runs `tests/boot-test.sh`. Nothing
-is built there.
+it, assembles it, boots **two** containers of it on one bridge and runs
+`tests/boot-test.sh` against them. Nothing is built there.
+
+### Two nodes, and replication proved (2026-09-27)
+
+The caller declares `roles: primary replica`, and the gate boots one
+container per role from the same published layer. Run 36313809854 of this
+repository, **1m17s for the job**, 54s of it in the boot test:
+
+| | |
+| --- | --- |
+| layer | `mariadb`, sha256 `0adca434`, parent `core` `7acf2c53`, `keel verify` exit 9 |
+| assemble | 16s and 14s, one rootfs per node, one layer cache for the run |
+| addresses | both from `lxcbr0` 6s after start, `fc42:5009:ba4b:5ab0:2eeb:3007:b430:dac0` and `...:a565:28bb:b076:701` |
+| first boot | finished on both 16s after start |
+| per node | declared password authenticated on `[::1]:3306`, `webmin-mysql` installed, Webmin 200 on 12321, `keel diff` 6 same and 0 drift |
+| reachability | each node's 3306 answered from the other over IPv6 4s after the restarts |
+| replication | `'repl'@'fc42:5009:ba4b:5ab0:%'`, `Slave_running ON` |
+| the proof | a value generated for the run, written on the primary and read from the replica by `admin` from the primary container: the same value |
+| teardown | both containers and the scratch tree gone, 0 container monitors left |
+
+What the phase configures by hand, and who owns each piece once the console
+has the modes of decision 0013, is the table in `tests/README.md`. None of
+it ships in the layer.
 
 ### What the gate found once the layer booted (2026-09-27)
 
