@@ -1,0 +1,67 @@
+#!/bin/bash -e
+# Give the MariaDB administrative account the password the instance
+# description declared, and prove it reached the database.
+#
+# secrets.db_password renders to DB_PASS (SECRET_VARS, the same table in
+# keel/spec/constants.py and in libinithooks/declarative.py of inithooks),
+# and DB_PASS is the variable every database hook common ships already
+# reads: overlays/pgsql firstboot.d/35pgsqlpass and overlays/adminer
+# firstboot.d/35adminer-mysqlpass. What was missing on the MariaDB side is
+# the hook, because the only one that calls bin/mysqlconf.py ships with
+# Adminer, which this layer leaves out. So the hook is here, at the
+# position upstream uses, and the shared vocabulary is untouched.
+#
+# MYSQL_PASS, which mk/turnkey/mysql.mk adds to CONF_VARS, is a build time
+# variable fab passes to the conf scripts inside the chroot. It never
+# reaches the inithooks conf and no hook reads it. Nothing here uses it.
+#
+# Decisions live in lib/mariadb.sh; this file is the part that touches the
+# system, and bin/dbpass.py is the only dialog.
+
+INITHOOKS_DEFAULT="${INITHOOKS_DEFAULT:-/etc/default/inithooks}"
+# shellcheck source=/etc/default/inithooks
+source "$INITHOOKS_DEFAULT"
+# shellcheck source=../lib/mariadb.sh
+source "$INITHOOKS_PATH/lib/mariadb.sh"
+
+fatal() { echo "fatal [35mysqlpass]: $*" >&2; exit 1; }
+
+if [[ -e "$INITHOOKS_CONF" ]]; then
+    # shellcheck source=/dev/null
+    source "$INITHOOKS_CONF"
+fi
+
+user=$(mariadb_admin_user "${APP_DB_USER-}") \
+    || fatal "'${APP_DB_USER-}' is not an account name this layer will create"
+
+mapfile -t missing < <(mariadb_missing_values "${DB_PASS-}")
+if [[ ${#missing[@]} -gt 0 ]]; then
+    [[ -t 0 ]] || fatal "no ${missing[*]} in $INITHOOKS_CONF and no terminal to" \
+        "ask on: declare secrets.db_password in the instance description"
+    while IFS='=' read -r key value; do
+        [[ -n "$key" ]] && declare "$key=$value"
+    done < <("$INITHOOKS_PATH/bin/dbpass.py" "${missing[@]}")
+    [[ -n "${DB_PASS-}" ]] || fatal "no password given"
+fi
+
+systemctl start "$MARIADB_SERVICE.service"
+mariadb_wait_ready "mysqladmin ping" "$MARIADB_WAIT_TRIES" \
+    || fatal "$MARIADB_SERVICE did not answer after $MARIADB_WAIT_TRIES tries"
+
+while read -r host; do
+    mapfile -t args < <(mariadb_conf_args "$user" "$host" "$DB_PASS") \
+        || fatal "cannot build the arguments for $user@$host"
+    "$INITHOOKS_PATH/bin/mysqlconf.py" "${args[@]}"
+done < <(mariadb_admin_hosts)
+
+# The point of this hook is that a declared password reaches the database,
+# so it says whether it did rather than leaving that to be discovered. The
+# password goes to the client in the environment, never on a command line.
+mapfile -t verify < <(mariadb_verify_args "$user" "$MARIADB_VERIFY_HOST" "$MARIADB_PORT") \
+    || fatal "cannot build the client arguments for $user@$MARIADB_VERIFY_HOST"
+MYSQL_PWD="$DB_PASS" mysql "${verify[@]}" >/dev/null \
+    || fatal "$user cannot authenticate on [$MARIADB_VERIFY_HOST]:$MARIADB_PORT" \
+        "with the declared password"
+
+echo "MariaDB account '$user' set from DB_PASS $(mariadb_masked "$DB_PASS")," \
+     "verified on [$MARIADB_VERIFY_HOST]:$MARIADB_PORT"

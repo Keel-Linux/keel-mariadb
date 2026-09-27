@@ -1,0 +1,17 @@
+# Keel: MariaDB listens on both loopback families and nothing else.
+#
+# Debian's 50-server.cnf binds 127.0.0.1 only, so an appliance above this
+# layer that reaches its database over IPv6 (brief section 10: IPv6 first)
+# finds nothing listening. Both are named here because MariaDB binds the
+# addresses it is given and nothing else.
+#
+# It is not opened to the network. This layer is what LAMP, LAPP and any
+# other appliance that needs a database is built on, and those talk to it
+# from the same machine. An appliance that really has remote clients opens
+# it, declares who may connect and terminates TLS, which is a decision the
+# appliance makes and not one a database layer makes for it. Upstream's
+# mysql and postgresql appliances do open theirs; see README.rst.
+#
+# 99- so it is read after 50-server.cnf: MariaDB keeps the last value.
+[mysqld]
+bind-address = ::1,127.0.0.1

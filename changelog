@@ -1,0 +1,23 @@
+turnkey-mariadb-19.0 (1) turnkey; urgency=low
+
+  * Initial release of the MariaDB database layer for Keel, compatible with
+    TurnKey Linux appliances. Built as a layer on core:
+    bt-layer mariadb --parent core.
+
+  * MariaDB 11.8 from Debian 13 (Trixie), listening on ::1 and 127.0.0.1
+    only (overlay/etc/mysql/mariadb.conf.d/99-keel-bind.cnf).
+
+  * webmin-mysql, so the database is administered from the Webmin panel
+    core already carries, at https://[address]:12321.
+
+  * An administrative account, 'admin', created unusable at build time and
+    given its password at first boot from the instance description:
+    secrets.db_password renders to DB_PASS, which
+    firstboot.d/35mysqlpass reads. This layer has no Adminer, so it ships
+    the hook the Adminer overlay of common would otherwise have brought.
+
+  * Adminer, lighttpd and php-fpm, which the upstream mysql appliance
+    bundles, are deliberately left out: they belong to the web stack that
+    LAMP builds on this layer.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sat, 27 Sep 2026 12:00:00 +0000

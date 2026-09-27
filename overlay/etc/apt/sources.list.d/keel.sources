@@ -1,0 +1,17 @@
+# Keel Linux package repository (brief section 5.4).
+#
+# Disabled until the repository is published and signed: the signing subkey
+# is being rotated and apt.keellinux.org is not serving yet. The evaluation
+# build took inithooks, confconsole and keel from the build host's unsigned
+# staging distribution through a source that existed only during the build
+# and was removed from this image (conf.d/main). Never point this file at
+# trixie-staging: it is unsigned by design.
+#
+# To enable once the key is installed as /usr/share/keyrings/keel-archive-keyring.gpg:
+# change "Enabled: no" to "Enabled: yes" and run apt update.
+Types: deb
+URIs: https://apt.keellinux.org
+Suites: trixie
+Components: main
+Enabled: no
+Signed-By: /usr/share/keyrings/keel-archive-keyring.gpg
