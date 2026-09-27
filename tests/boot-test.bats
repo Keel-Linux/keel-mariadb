@@ -319,9 +319,9 @@ DEF
     [ "$output" = $'/r/etc/keel/instance.yaml\n/r/etc/inithooks.yaml' ]
 }
 
-@test "secret_targets: the two secret files the spec references" {
+@test "secret_targets: the three secret files the spec references" {
     output=$(bt_secret_targets /r)
-    [ "$output" = $'/r/etc/keel/secrets/root_password\n/r/etc/keel/secrets/db_password' ]
+    [ "$output" = $'/r/etc/keel/secrets/root_password\n/r/etc/keel/secrets/db_password\n/r/etc/keel/secrets/app_password' ]
 }
 
 @test "webmin_verdict: the login page or a challenge is an answer" {
@@ -421,4 +421,211 @@ DEF
     run bt_diff_verdict 127
     [ "$status" -eq 1 ]
     [[ $output == *"failed with exit 127"* ]]
+}
+
+# --- the node options -------------------------------------------------
+
+@test "parse_args: roles, the node library and the report are parsed" {
+    bt_parse_args mariadb --roles "primary replica" \
+        --nodes-lib /n/lib.sh --nodes-report /n/report
+    [ "$BT_ROLES" = "primary replica" ]
+    [ "$BT_NODES_LIB" = /n/lib.sh ]
+    [ "$BT_NODES_REPORT" = /n/report ]
+}
+
+@test "parse_args: no roles means one node and nothing else set" {
+    bt_parse_args mariadb
+    [ -z "$BT_ROLES" ]
+    [ -z "$BT_NODES_LIB" ]
+    [ -z "$BT_NODES_REPORT" ]
+}
+
+@test "parse_args: roles without the node library is refused" {
+    run bt_parse_args mariadb --roles "primary replica"
+    [ "$status" -eq 1 ]
+    [[ $output == *"--roles needs --nodes-lib"* ]]
+}
+
+@test "parse_args: a report with nothing to report is refused" {
+    run bt_parse_args mariadb --nodes-report /n/report
+    [ "$status" -eq 1 ]
+    [[ $output == *"nothing to report without --roles"* ]]
+}
+
+@test "parse_args: each node option needs a value" {
+    run ! bt_parse_args mariadb --roles
+    run ! bt_parse_args mariadb --nodes-lib
+    run ! bt_parse_args mariadb --nodes-report
+}
+
+# --- the replication phase, by hand -----------------------------------
+
+@test "repl_host_pattern: the /64 of a global address, as MariaDB writes it" {
+    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f)
+    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
+    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0::2)
+    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
+}
+
+@test "repl_host_pattern: refuses anything that is not a global IPv6" {
+    run bt_repl_host_pattern ::1
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a global IPv6 address to authorise"* ]]
+    run ! bt_repl_host_pattern 10.0.0.1
+    run ! bt_repl_host_pattern fe80::1
+}
+
+@test "repl_host_pattern: refuses an address whose /64 is compressed away" {
+    run bt_repl_host_pattern "fc42::2"
+    [ "$status" -eq 1 ]
+    [[ $output == *"no written out /64 prefix"* ]]
+}
+
+@test "is_sql_literal: a generated password, and nothing needing an escape" {
+    bt_is_sql_literal abcXYZ019
+    bt_is_sql_literal 'fc42:5009:ba4b:5ab0:%'
+    ! bt_is_sql_literal ""
+    ! bt_is_sql_literal "it's"
+    ! bt_is_sql_literal 'back\slash'
+    ! bt_is_sql_literal 'two words'
+}
+
+@test "repl_cnf: the primary gets a server id, a bind list and a binary log" {
+    output=$(bt_repl_cnf primary 1 fc42:5009:ba4b:5ab0::1)
+    [[ $output == *"server_id = 1"* ]]
+    [[ $output == *"bind-address = ::1,127.0.0.1,fc42:5009:ba4b:5ab0::1"* ]]
+    [[ $output == *"skip_name_resolve = ON"* ]]
+    [[ $output == *"log_bin = mariadb-bin"* ]]
+    [[ $output == *"binlog_format = ROW"* ]]
+}
+
+@test "repl_cnf: the replica gets no binary log, because it reads one" {
+    output=$(bt_repl_cnf replica 2 fc42:5009:ba4b:5ab0::2)
+    [[ $output == *"server_id = 2"* ]]
+    [[ $output == *"bind-address = ::1,127.0.0.1,fc42:5009:ba4b:5ab0::2"* ]]
+    [[ $output != *"log_bin"* ]]
+}
+
+@test "repl_cnf: refuses a role, a server id or an address it cannot use" {
+    run bt_repl_cnf arbiter 1 fc42::1
+    [ "$status" -eq 1 ]
+    [[ $output == *"is neither primary nor replica"* ]]
+    run bt_repl_cnf primary 0 fc42::1
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a server id"* ]]
+    run bt_repl_cnf primary 1 ::1
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a global IPv6 address to listen on"* ]]
+}
+
+@test "repl_account_sql: idempotent, and the grant is one of two" {
+    output=$(bt_repl_account_sql repl 'fc42:5009:ba4b:5ab0:%' 'REPLICATION SLAVE' secret1)
+    [[ $output == *"CREATE USER IF NOT EXISTS 'repl'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    [[ $output == *"ALTER USER 'repl'@'fc42:5009:ba4b:5ab0:%' IDENTIFIED BY 'secret1'"* ]]
+    [[ $output == *"GRANT REPLICATION SLAVE ON *.* TO 'repl'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    [[ $output == *"FLUSH PRIVILEGES"* ]]
+    output=$(bt_repl_account_sql admin 'fc42:%' 'ALL PRIVILEGES' secret2)
+    [[ $output == *"GRANT ALL PRIVILEGES ON *.* TO 'admin'@'fc42:%'"* ]]
+}
+
+@test "repl_account_sql: refuses a value that would need escaping" {
+    run bt_repl_account_sql "rep'l" 'fc42:%' 'ALL PRIVILEGES' secret
+    [ "$status" -eq 1 ]
+    [[ $output == *"needs a plain user, host and password"* ]]
+    run ! bt_repl_account_sql repl "" 'ALL PRIVILEGES' secret
+    run ! bt_repl_account_sql repl 'fc42:%' 'ALL PRIVILEGES' "pass word"
+}
+
+@test "repl_account_sql: refuses a grant this test does not make" {
+    run bt_repl_account_sql repl 'fc42:%' 'SUPER' secret
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a grant this test makes"* ]]
+}
+
+@test "repl_start_sql: GTID, an unbracketed literal and a fresh position" {
+    output=$(bt_repl_start_sql repl secret fc42:5009:ba4b:5ab0::1 3306)
+    [[ $output == *"STOP SLAVE;"* ]]
+    [[ $output == *"SET GLOBAL gtid_slave_pos = '';"* ]]
+    [[ $output == *"MASTER_HOST='fc42:5009:ba4b:5ab0::1', MASTER_PORT=3306"* ]]
+    [[ $output == *"MASTER_USER='repl', MASTER_PASSWORD='secret'"* ]]
+    [[ $output == *"MASTER_USE_GTID=slave_pos"* ]]
+    [[ $output == *"START SLAVE;"* ]]
+}
+
+@test "repl_start_sql: refuses a bad account, address or port" {
+    run bt_repl_start_sql "re'pl" secret fc42::1 3306
+    [ "$status" -eq 1 ]
+    [[ $output == *"needs a plain user and password"* ]]
+    run bt_repl_start_sql repl "pass word" fc42::1 3306
+    [ "$status" -eq 1 ]
+    [[ $output == *"needs a plain user and password"* ]]
+    run bt_repl_start_sql repl secret ::1 3306
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a global IPv6 address to replicate from"* ]]
+    run bt_repl_start_sql repl secret fc42::1 threethousand
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a port"* ]]
+}
+
+@test "repl_write_sql: one row, with the marker of this run" {
+    output=$(bt_repl_write_sql Zk9)
+    [[ $output == *"CREATE DATABASE IF NOT EXISTS keeltest;"* ]]
+    [[ $output == *"CREATE TABLE IF NOT EXISTS keeltest.proof"* ]]
+    [[ $output == *"REPLACE INTO keeltest.proof (id, marker) VALUES (1, 'Zk9');"* ]]
+}
+
+@test "repl_write_sql: refuses a marker it did not generate" {
+    run bt_repl_write_sql "'; DROP DATABASE keeltest; --"
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a marker this test writes"* ]]
+    run bt_repl_write_sql "$(printf 'a%.0s' {1..65})"
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a marker this test writes"* ]]
+    run bt_repl_write_sql ""
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a marker this test writes"* ]]
+}
+
+@test "repl_read_query: the one row, by key" {
+    output=$(bt_repl_read_query)
+    [ "$output" = "SELECT marker FROM keeltest.proof WHERE id = 1" ]
+}
+
+@test "repl_running_verdict: the server's own answer decides" {
+    run bt_repl_running_verdict "$(printf 'Slave_running\tON\n')"
+    [ "$status" -eq 0 ]
+    [[ $output == *"reports Slave_running ON"* ]]
+    run bt_repl_running_verdict "$(printf 'Slave_running\tOFF\n')"
+    [ "$status" -eq 1 ]
+    [[ $output == *"reports Slave_running 'OFF', not ON"* ]]
+    run bt_repl_running_verdict ""
+    [ "$status" -eq 1 ]
+    [[ $output == *"reports Slave_running 'nothing'"* ]]
+}
+
+@test "repl_row_verdict: the row read on the replica is the row written" {
+    run bt_repl_row_verdict Zk9 "$(printf 'Zk9\n')"
+    [ "$status" -eq 0 ]
+    [[ $output == *"returned the row written on the primary (Zk9)"* ]]
+}
+
+@test "repl_row_verdict: a different row, no row, or nothing expected, fails" {
+    run bt_repl_row_verdict Zk9 "other"
+    [ "$status" -eq 1 ]
+    [[ $output == *"returned 'other', not the row written"* ]]
+    run ! bt_repl_row_verdict Zk9 ""
+    run ! bt_repl_row_verdict "" ""
+}
+
+@test "db_argv: the client command for a query this test chooses" {
+    output=$(bt_db_argv admin fc42::2 3306 "SELECT marker FROM t")
+    [ "$output" = $'mysql\n--user=admin\n--host=fc42::2\n--port=3306\n--protocol=TCP\n--batch\n--skip-column-names\n--execute=SELECT marker FROM t' ]
+}
+
+@test "db_argv: refuses an empty field or a port that is not a number" {
+    run ! bt_db_argv "" fc42::2 3306 "SELECT 1"
+    run ! bt_db_argv admin "" 3306 "SELECT 1"
+    run ! bt_db_argv admin fc42::2 3306 ""
+    run ! bt_db_argv admin fc42::2 "" "SELECT 1"
+    run ! bt_db_argv admin fc42::2 threethousand "SELECT 1"
 }
