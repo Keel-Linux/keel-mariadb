@@ -161,3 +161,6 @@ credential. It is declared rather than invented in the test because the point
 is that a replication password arrives the way the administrative one does.
 No hook on this layer reads `APP_PASS`, and `keel diff` never compares secret
 values, so a single node run is unaffected.
+
+<!-- Cancellation check of the two node teardown, 2026-09-27. This branch is
+     deleted once the check is recorded. -->
