@@ -1,0 +1,53 @@
+# Instance description of the boot test (format: docs/spec.md of the keel
+# repository). IPv6 first, address from the bridge, no certificate request.
+# The two passwords are files the test writes into the rootfs before
+# booting, which is the whole point of this test: secrets.db_password is
+# declared here, nothing is typed at the console, and after the first boot
+# a database client authenticates with exactly that value.
+#
+# This is the throwaway container the gate boots. The description an
+# operator would start from is keel/instance.example.yaml.
+version: 1
+
+instance:
+  hostname: mariadb
+  fqdn: mariadb.example.org
+
+network:
+  # The container's address comes from the bridge, so the host owns the
+  # interface configuration and 01ipconfig writes nothing.
+  managed_by: host
+  interfaces:
+    eth0:
+      ipv6:
+        method: auto
+
+tls:
+  acme:
+    enabled: false
+
+secrets:
+  root_password:
+    file: /etc/keel/secrets/root_password
+  # What this layer exists for. It renders to DB_PASS, which
+  # firstboot.d/35mysqlpass reads and hands to bin/mysqlconf.py.
+  db_password:
+    file: /etc/keel/secrets/db_password
+
+app:
+  options:
+    # Renders to APP_DB_USER: the account the declared password belongs
+    # to. It is the account conf.d/main creates, named here so an
+    # appliance built on this layer can see where to change it.
+    db_user: admin
+
+hub:
+  api_key: skip
+
+security:
+  alerts: skip
+  # A first boot input, not machine state: 95secupdates installs the
+  # pending security updates once. diff does not compare it.
+  updates_at_first_boot: skip
+
+first_login_wizard: false

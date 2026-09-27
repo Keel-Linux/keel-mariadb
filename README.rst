@@ -96,6 +96,9 @@ random one would make the layer irreproducible.
 Tests
 -----
 
-``tests/coverage.sh`` gates the shell this layer writes and
-``tests/boot-test.sh`` boots the published layer and proves the
-declarative path; see ``tests/README.md`` and ``COVERAGE.md``.
+``tests/README.md`` has the detail. In short: ``tests/coverage.sh`` runs
+the bats suite under kcov and gates the shell this layer writes;
+``tests/boot-test.sh`` assembles the published layer, boots it headless
+from an instance description that declares ``secrets.db_password`` from a
+file, connects to the database with that password, checks the Webmin
+module and Webmin over IPv6, and runs ``keel diff``.
