@@ -19,16 +19,17 @@ permissions:
 
 jobs:
   tests:
-    # Threshold 0 is the bootstrap case of test-shell.yml: there is no
-    # tests/coverage.sh on this branch yet, so the job passes with a notice
-    # and the check exists, which is what lets main be protected from the
-    # first day. It is raised to the measured number when the tests land,
-    # and only ever raised (decision 0006). This job produces the check
-    # "tests / coverage", the required status on main. The job id is part
-    # of that name, so renaming it silently detaches the protection rule.
+    # tests/coverage.sh measures three shell files (COVERAGE.md): the first
+    # boot library at 100 percent, the first boot hook at 95.45 (the one
+    # uncovered line is the process substitution kcov attributes to no
+    # line) and the boot test's library at 100. The threshold is the lowest
+    # of them and is only ever raised (decision 0006). This job produces
+    # the check "tests / coverage", the required status on main. The job id
+    # is part of that name, so renaming it silently detaches the protection
+    # rule.
     uses: keel-linux/.github/.github/workflows/test-shell.yml@main
     with:
-      threshold: 0
+      threshold: 95
   appliance:
     # The boot test (org-plan section 1): the mariadb layer is fetched from
     # https://mirror.keellinux.org/layers, verified, assembled into a
