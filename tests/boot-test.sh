@@ -61,14 +61,16 @@ mkdir -p "$BT_ROOTFS"
 keel pull "$BT_APPLIANCE" --source "$BT_LAYERS_DIR" --cache-dir "$BT_CACHE_DIR" --non-interactive
 keel assemble "$BT_APPLIANCE" --rootfs "$BT_ROOTFS" --cache-dir "$BT_CACHE_DIR" --non-interactive
 
-# 2. The container marker, the instance description, the secrets it
-#    references and the conf the first boot hooks read. The marker under
-#    /var/lib/turnkey-info is what bt-container writes and what inspect
-#    reads to call the machine a container (managed_by: host); the conf is
-#    what makes the first boot headless, and without it 30rootpass and
-#    35mysqlpass wait on a dialog forever.
+# 2. The container marks, the instance description, the secrets it
+#    references and the conf the first boot hooks read. bt_mark_container
+#    does what buildtasks' container patch does: the marker under
+#    /var/lib/turnkey-info that inspect reads to call the machine a
+#    container (managed_by: host), and REDIRECT_OUTPUT=true with a
+#    drop-in, without which a hook that prints a lot blocks writing to a
+#    tty1 nobody reads. The conf is what makes the first boot headless,
+#    and without it 30rootpass and 35mysqlpass wait on a dialog forever.
 log "installing the description, the secrets and the conf into $BT_ROOTFS"
-install -D -m 0644 /dev/null "$BT_ROOTFS/var/lib/turnkey-info/inithooks.service/lxc"
+bt_mark_container "$BT_ROOTFS"
 install -d -m 0700 "$BT_ROOTFS/etc/keel/secrets"
 for target in $(bt_secret_targets "$BT_ROOTFS"); do
     bt_random_password > "$target"

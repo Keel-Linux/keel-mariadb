@@ -242,6 +242,78 @@ never() { return 1; }
     [[ $output == *"lxc.net.0.type = veth"* ]]
 }
 
+@test "lxc_config: the apparmor pair a container running systemd needs" {
+    output=$(bt_lxc_config keel-mariadb-boot-test /r/rootfs br0)
+    [[ $output == *"lxc.apparmor.profile = generated"* ]]
+    [[ $output == *"lxc.apparmor.allow_nesting = 1"* ]]
+}
+
+fake_rootfs() {
+    # fake_rootfs [VALUE]: a scratch rootfs with an inithooks defaults file,
+    # REDIRECT_OUTPUT set to VALUE (default false), printed on stdout
+    local rootfs="$BATS_TEST_TMPDIR/rootfs-$RANDOM"
+    mkdir -p "$rootfs/etc/default"
+    cat > "$rootfs/$BT_INITHOOKS_DEFAULT" <<DEF
+INITHOOKS_CONF=/etc/inithooks.conf
+RUN_FIRSTBOOT=true
+REDIRECT_OUTPUT=${1-false}
+SUDOADMIN=false
+DEF
+    printf '%s\n' "$rootfs"
+}
+
+@test "mark_container: writes the marker the unit conditions and inspect read" {
+    rootfs=$(fake_rootfs)
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 0 ]
+    [ -f "$rootfs/var/lib/turnkey-info/inithooks.service/lxc" ]
+}
+
+@test "mark_container: turns REDIRECT_OUTPUT on, so no hook blocks writing to tty1" {
+    rootfs=$(fake_rootfs false)
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 0 ]
+    grep -q '^REDIRECT_OUTPUT=true$' "$rootfs/$BT_INITHOOKS_DEFAULT"
+    # the rest of the file is left alone
+    grep -q '^RUN_FIRSTBOOT=true$' "$rootfs/$BT_INITHOOKS_DEFAULT"
+    grep -q '^SUDOADMIN=false$' "$rootfs/$BT_INITHOOKS_DEFAULT"
+}
+
+@test "mark_container: takes the first boot off tty1 with a systemd drop-in" {
+    rootfs=$(fake_rootfs)
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 0 ]
+    dropin="$rootfs/$BT_INITHOOKS_DROPIN"
+    [ -f "$dropin" ]
+    grep -q '^\[Service\]$' "$dropin"
+    grep -q '^StandardOutput=journal$' "$dropin"
+    grep -q '^StandardError=journal$' "$dropin"
+}
+
+@test "mark_container: a tree that already redirects is left redirecting" {
+    rootfs=$(fake_rootfs true)
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^REDIRECT_OUTPUT=true$' "$rootfs/$BT_INITHOOKS_DEFAULT")" -eq 1 ]
+}
+
+@test "mark_container: a rootfs with no inithooks defaults fails loudly" {
+    rootfs="$BATS_TEST_TMPDIR/bare"
+    mkdir -p "$rootfs"
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not in the rootfs"* ]]
+}
+
+@test "mark_container: defaults that declare no REDIRECT_OUTPUT fail loudly" {
+    rootfs=$(fake_rootfs)
+    grep -v REDIRECT_OUTPUT "$rootfs/$BT_INITHOOKS_DEFAULT" > "$rootfs/trimmed"
+    mv "$rootfs/trimmed" "$rootfs/$BT_INITHOOKS_DEFAULT"
+    run bt_mark_container "$rootfs"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"declares no REDIRECT_OUTPUT"* ]]
+}
+
 @test "spec_targets: both paths the first boot reads, under the rootfs" {
     output=$(bt_spec_targets /r)
     [ "$output" = $'/r/etc/keel/instance.yaml\n/r/etc/inithooks.yaml' ]
