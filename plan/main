@@ -1,0 +1,14 @@
+#include <turnkey/base>
+
+/* MariaDB, python3-pymysql (bin/mysqlconf.py) and webmin-mysql, the module
+   that puts the database in the panel core already carries. */
+#include <turnkey/mysql>
+
+/* the command line client: the appliance talks to its own database over
+   loopback, and the first boot hook proves the password it just set */
+mariadb-client
+
+/* project packages, resolved from the build host's staging repository */
+inithooks
+confconsole
+keel

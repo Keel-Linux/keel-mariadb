@@ -1,0 +1,51 @@
+# Instance description of a MariaDB appliance, IPv6 first (docs/spec.md in
+# the keel repository). Copy to /etc/keel/instance.yaml and create the two
+# secret files (mode 0600, owned by root) before the first boot:
+#
+#   /etc/keel/secrets/root_password
+#   /etc/keel/secrets/db_password     the MariaDB 'admin' account
+#
+# secrets.db_password is what reaches the database. Leave it out and the
+# first boot has nothing to set the account with: on a headless machine
+# firstboot.d/35mysqlpass says so and fails, and the account stays unable
+# to authenticate, which is the state conf.d/main published it in.
+version: 1
+
+instance:
+  hostname: mariadb
+  fqdn: mariadb.example.org
+
+network:
+  # LXC: the host owns eth0 and the address comes by SLAAC from the host's
+  # /64. Switch to method static with an address once a DNS record points
+  # at it, so the address the record names never moves.
+  managed_by: host
+  interfaces:
+    eth0:
+      ipv6:
+        method: auto
+
+tls:
+  acme:
+    # The database speaks its own protocol on 3306 and this layer serves no
+    # web page of its own. Webmin, on 12321, carries its own certificate.
+    enabled: false
+
+secrets:
+  root_password:
+    file: /etc/keel/secrets/root_password
+  db_password:
+    file: /etc/keel/secrets/db_password
+
+app:
+  options:
+    db_user: admin
+
+hub:
+  api_key: skip
+
+security:
+  alerts: skip
+  updates_at_first_boot: skip
+
+first_login_wizard: false
