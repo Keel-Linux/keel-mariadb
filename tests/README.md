@@ -149,7 +149,7 @@ the console's Primary and Replica screens call.
 | the replication account, authorised for the peer's /64 | `keel`, from `replication.allowed_from`. The description carries the `/64`, and keel writes the host pattern MariaDB holds |
 | `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos` and `START SLAVE` | `keel`, from `replication.primary` |
 | an empty `gtid_slave_pos` | `keel`, and only over a database that holds nothing, which is why the refusal below is asserted first |
-| a host row for the administrative account on the replica | still the test's, and not part of the feature: it exists only so the row can be read from the other machine by a declared account |
+| a host row for the administrative account on the replica | still the test's, and not part of the feature: it exists only so the row can be read from the other machine by a declared account. `SELECT` on the one database and never `ALL PRIVILEGES`, which carries `Repl_slave_priv` and would make the replica read as a primary |
 
 What the test writes is a **description**, appended to `tests/instance.yaml`
 in each node's own rootfs once the addresses exist: its role, the addresses

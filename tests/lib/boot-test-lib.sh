@@ -662,11 +662,19 @@ bt_keel_deb_argv() {
 
 bt_repl_admin_sql() {
     # bt_repl_admin_sql USER HOST PASSWORD: a host row for the
-    # administrative account. The one statement this phase still issues by
-    # hand, and it is not part of the replication feature: it exists only
-    # so the proof below can be read from the other machine by an account
-    # the description declares, rather than by something the test invented.
-    # Idempotent, so a retry passes.
+    # administrative account on the replica. The one statement this phase
+    # still issues by hand, and it is not part of the replication feature:
+    # it exists only so the proof below can be read from the other machine
+    # by an account the description declares, rather than by something the
+    # test invented. Idempotent, so a retry passes.
+    #
+    # SELECT on the one database, and deliberately not ALL PRIVILEGES.
+    # ALL includes Repl_slave_priv, so an administrative account reachable
+    # from a prefix is an authorization to replicate from that prefix, and
+    # `keel inspect` reads the machine as a primary because that is what
+    # the machine is. apply then refuses to demote it, correctly, and the
+    # replica is never built. Measured on the build host 2026-09-27, and
+    # the fix is to grant what the test needs and nothing more.
     local user=${1-} host=${2-} password=${3-}
     if ! bt_is_sql_literal "$user" || ! bt_is_sql_literal "$host" \
        || ! bt_is_sql_literal "$password"; then
@@ -676,7 +684,7 @@ bt_repl_admin_sql() {
     cat <<SQL
 CREATE USER IF NOT EXISTS '$user'@'$host' IDENTIFIED BY '$password';
 ALTER USER '$user'@'$host' IDENTIFIED BY '$password';
-GRANT ALL PRIVILEGES ON *.* TO '$user'@'$host';
+GRANT SELECT ON $BT_REPL_DB.* TO '$user'@'$host';
 FLUSH PRIVILEGES;
 SQL
 }

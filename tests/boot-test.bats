@@ -604,7 +604,10 @@ log_bin = mariadb-bin"
     output=$(bt_repl_admin_sql admin 'fc42:5009:ba4b:5ab0:%' secret1)
     [[ $output == *"CREATE USER IF NOT EXISTS 'admin'@'fc42:5009:ba4b:5ab0:%'"* ]]
     [[ $output == *"ALTER USER 'admin'@'fc42:5009:ba4b:5ab0:%' IDENTIFIED BY 'secret1'"* ]]
-    [[ $output == *"GRANT ALL PRIVILEGES ON *.* TO 'admin'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    [[ $output == *"GRANT SELECT ON keeltest.* TO 'admin'@'fc42:5009:ba4b:5ab0:%'"* ]]
+    # Never ALL: it carries Repl_slave_priv, which makes the machine a
+    # primary in the server's own eyes and in what keel inspect reads.
+    [[ $output != *"ALL PRIVILEGES"* ]]
     run bt_repl_admin_sql "adm'in" 'fc42:%' secret
     [ "$status" -eq 1 ]
     [[ $output == *"needs a plain user, host and password"* ]]
