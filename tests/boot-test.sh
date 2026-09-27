@@ -324,7 +324,7 @@ primary=$(btn_role_node "$topology" "$BT_ROLE_PRIMARY")
 replica=$(btn_role_node "$topology" "$BT_ROLE_REPLICA")
 primary_addr=$(node_addr "$primary")
 replica_addr=$(node_addr "$replica")
-primary_prefix=$(bt_repl_prefix "$primary_addr")
+primary_pattern=$(bt_repl_host_pattern "$primary_addr")
 log "replication phase: primary $primary [$primary_addr], replica $replica [$replica_addr]"
 
 apply_output=""
@@ -402,9 +402,9 @@ done
 #     piece of hand configuration left, and it is not part of the feature:
 #     it exists only so the proof below can be read from the other machine
 #     by an account the description declares.
-bt_repl_admin_sql "$BT_DB_USER" "$primary_prefix" "$declared_password" \
+bt_repl_admin_sql "$BT_DB_USER" "$primary_pattern" "$declared_password" \
     | lxc attach "$replica" -- mysql
-log "$replica: '$BT_DB_USER'@'$primary_prefix' may read it"
+log "$replica: '$BT_DB_USER'@'$primary_pattern' may read it"
 
 # 8f. Now the replica, over a database that holds nothing.
 apply_node "$replica"

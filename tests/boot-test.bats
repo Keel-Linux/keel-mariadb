@@ -504,6 +504,12 @@ DEF
     [[ $output == *"no written out /64 prefix"* ]]
 }
 
+@test "repl_host_pattern: the /64 in MariaDB's own spelling, for one account" {
+    output=$(bt_repl_host_pattern fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f)
+    [ "$output" = 'fc42:5009:ba4b:5ab0:%' ]
+    run ! bt_repl_host_pattern ::1
+}
+
 @test "is_sql_literal: a generated password, and nothing needing an escape" {
     bt_is_sql_literal abcXYZ019
     bt_is_sql_literal 'fc42:5009:ba4b:5ab0:%'

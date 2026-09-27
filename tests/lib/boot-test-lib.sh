@@ -519,6 +519,16 @@ bt_repl_prefix() {
     printf '%s:%s:%s:%s::/64\n' "${parts[0]}" "${parts[1]}" "${parts[2]}" "${parts[3]}"
 }
 
+bt_repl_host_pattern() {
+    # bt_repl_host_pattern ADDRESS: the /64 in MariaDB's own spelling. The
+    # description never carries this form, keel writes it from the prefix;
+    # it is here for the one account row below that is not part of the
+    # feature and that this test creates itself.
+    local prefix
+    prefix=$(bt_repl_prefix "${1-}") || return 1
+    printf '%s%%\n' "${prefix%%::/64}:"
+}
+
 bt_is_sql_literal() {
     # A value that can go inside single quotes in SQL as it stands. The
     # values this test puts in a statement are ones it generated itself,

@@ -10,13 +10,13 @@ LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 | --- | --- | --- | --- |
 | overlay/usr/lib/inithooks/lib/mariadb.sh | tests/mariadb.bats (13 tests) | 100 percent (43/43) under kcov | every function and every branch |
 | overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (12 tests) | 95.45 percent (21/22) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
-| tests/lib/boot-test-lib.sh | tests/boot-test.bats (74 tests) | 100 percent (282/282) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts, the node options, and the replication phase: the section each node's description gains, the verdicts on what keel did, and the refusal that must happen when the replica holds data |
+| tests/lib/boot-test-lib.sh | tests/boot-test.bats (75 tests) | 100 percent (285/285) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts, the node options, and the replication phase: the section each node's description gains, the verdicts on what keel did, and the refusal that must happen when the replica holds data |
 | overlay/usr/lib/inithooks/bin/dbpass.py | none | 0 | dialog wrapper, only reached with a terminal attached |
 | conf.d/main | the build | integration only | build time script, 0004 pragmatic limits |
 | tests/boot-test.sh | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the three measured shell files: **99.71 percent (346/347)**,
-99 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
+Total over the three measured shell files: **99.71 percent (349/350)**,
+100 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
 the workflow sets to 95, the lowest measured file. It is only ever raised
 (decision 0006).
 
@@ -24,7 +24,7 @@ the workflow sets to 95, the lowest measured file. It is only ever raised
     kcov line coverage (threshold 95 percent):
      100.00  43/43  mariadb.sh
       95.45  21/22  35mysqlpass
-     100.00  282/282  boot-test-lib.sh
+     100.00  285/285  boot-test-lib.sh
 
 The topology of a run with several nodes is not measured here because it is
 not here: `lib/boot-test-nodes.sh` of `keel-linux/.github` holds it, at 113
