@@ -17,9 +17,15 @@ the machine matches the description.
   builds nothing, so it needs no fab, deck or buildtasks.
 - `lib/boot-test-lib.sh`: the logic (argument parsing, address discovery
   from `lxc-info`, waiting with a deadline, the secret files, the client
-  call, the database, module and Webmin verdicts, the diff verdict), as
+  call, the database, module and Webmin verdicts, the diff verdict, and the
+  replication phase's drop-in, accounts, statements and verdicts), as
   functions with no side effects, per decision 0004. Same shape as the one
   in keel-core and keel-nodebb.
+- The topology of a run with several nodes is not here: it is
+  `lib/boot-test-nodes.sh` of `keel-linux/.github`, which the reusable
+  workflow clones and passes with `--nodes-lib`, and which is unit tested
+  and measured in that repository. It is shared rather than copied because
+  four copies of a boot test library is the trap `docs/traps.md` ends with.
 - `boot-test.bats`: unit tests of that library. `lxc-info` is a stub first
   in `PATH`; the clock and `sleep` are functions. No root, no network, no
   LXC, no database.
@@ -101,3 +107,57 @@ What it does, in order:
    12321.
 9. Runs `keel diff --root <rootfs> --spec tests/instance.yaml`; exit 0 or
    13 (no drift) passes.
+
+## Two nodes, and the replication phase
+
+`--roles "primary replica"` boots one container per role on the same bridge
+and runs everything above on each of them, then proves replication between
+them. The reusable workflow passes it, because `.github/workflows/tests.yml`
+declares `roles: primary replica`; by hand it is
+
+    tests/boot-test.sh mariadb --roles "primary replica" \
+        --nodes-lib /path/to/.github/lib/boot-test-nodes.sh \
+        --layers-dir https://mirror.keellinux.org/layers --bridge lxcbr0
+
+where the node library is `lib/boot-test-nodes.sh` of `keel-linux/.github`,
+which the workflow clones for itself. The count is the number of role names,
+so Galera's three later is another name and nothing here assumes two.
+
+Containers are `NAME-1` and `NAME-2`. Each is told which one it is in
+`/etc/keel/node.env` in its own rootfs, and once both have an address each
+gets `/etc/keel/peers.env` with every node's literal IPv6 address. The test
+addresses the other node by that literal address and never by a name, because
+on Debian a name resolves to IPv4 alone.
+
+### What the phase does, and who owns each piece later
+
+The phase exists because handbook decision 0013 says the console's
+replication modes should not be built if they cannot be tested in the gate.
+It is therefore deliberately hand configuration, and every piece of it is
+something the appliance will own:
+
+| Done by hand here | Owner once the console has the modes |
+| --- | --- |
+| `/etc/keel/node.env`, the role | the instance description (decision 0013, phase 2) |
+| the drop-in `zz-keel-boot-test-replication.cnf`: `server_id`, `bind-address` with this node's own literal global address, `skip_name_resolve`, and `log_bin` on the primary alone | the Primary and Replica screens |
+| the replication account, authorised for the peer's /64 rather than one address | the Primary screen, which is what "a primary holds authorizations" means |
+| a host row for the administrative account on the replica | nobody: it exists only so the row can be read from the other machine by a declared account |
+| `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos` and `START SLAVE` | the Replica screen |
+| an empty `gtid_slave_pos`, meaning "from the start of the primary's log" | the Replica screen's seeding step, which will be a backup of the primary |
+
+In order: the drop-in and a restart on both; each node's database confirmed
+reachable from the other over IPv6; the accounts; `START SLAVE`; the server
+asked what it thinks it is (`Slave_running`, not the configuration read
+back); then a value generated on the host for this run, written on the
+primary and read from the replica **from the primary container** over IPv6.
+The same value appearing there can only mean replication carried it.
+
+`keel diff` runs before the phase on purpose: the drop-in is drift the
+description says nothing about, which is the class of problem decision 0013
+lists under promotion.
+
+`secrets.app_password` in `tests/instance.yaml` is the replication
+credential. It is declared rather than invented in the test because the point
+is that a replication password arrives the way the administrative one does.
+No hook on this layer reads `APP_PASS`, and `keel diff` never compares secret
+values, so a single node run is unaffected.
