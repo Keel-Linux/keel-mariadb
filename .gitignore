@@ -1,0 +1,5 @@
+# The components this recipe composes are materialised here before a build,
+# one directory per unit, each a checkout of its own repository at the version
+# the build pins (README.rst). They are not part of this repository: the layer
+# manifest bt-layer writes is the record of which ones were applied.
+/unit.d/

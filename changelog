@@ -1,3 +1,21 @@
+turnkey-mariadb-19.0 (2) turnkey; urgency=low
+
+  * The MariaDB server is a component instead of a piece of the shared tree.
+    The recipe no longer includes mk/turnkey/mysql.mk or the turnkey/mysql
+    plan; it composes keel-linux/unit-mariadb as unit.d/mariadb, which fab
+    resolves and applies and bt-layer records in the layer manifest as
+    "units mariadb@<version>". Decision 0013 is the reason: a database is a
+    component, so LAMP and LAPP can share one apache-php layer instead of
+    being children of two different databases.
+
+  * No change to what the image gets. The component carries the same plan,
+    the same overlay byte for byte and the same conf script, and the layer
+    built this way was compared to a layer built from the shared tree the way
+    decision 0010 compares them, with a second build of the shared tree to
+    measure the noise the comparison is read against.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 27 Sep 2026 10:00:00 +0000
+
 turnkey-mariadb-19.0 (1) turnkey; urgency=low
 
   * Initial release of the MariaDB database layer for Keel, compatible with
