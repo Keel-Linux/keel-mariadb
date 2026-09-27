@@ -52,23 +52,33 @@ BT_INITHOOKS_DEFAULT="etc/default/inithooks"
 BT_INITHOOKS_DROPIN="etc/systemd/system/inithooks.service.d/container.conf"
 
 # The replication phase, which runs only when --roles asks for more than one
-# node. None of this is a feature of the layer: it is the gate proving it can
-# see replication work, by hand, so that the appliance's own replication
-# feature has a test to be written against (handbook decision 0013, which
-# says that if it cannot be tested in the gate it should not be built).
-# Everything here is therefore temporary by design and is listed in
-# tests/README.md as what the appliance will later own.
+# node. The test configures nothing here any more: it writes each node's
+# role into that node's own instance description and runs
+# `keel spec apply --system-only`, which is what an operator does from the
+# console (handbook decision 0013, keel docs/apply.md). What is left below
+# is what a test is for: the description to write, and the questions the
+# servers are asked afterwards.
 BT_ROLE_PRIMARY=primary
 BT_ROLE_REPLICA=replica
 BT_REPL_USER=repl
 BT_REPL_DB=keeltest
 BT_REPL_TABLE=proof
-BT_REPL_BINLOG=mariadb-bin
-# Sorts after the layer's own 99-keel-bind.cnf, so the bind address this
-# adds is the one the server comes up with.
-BT_REPL_CNF="etc/mysql/mariadb.conf.d/zz-keel-boot-test-replication.cnf"
+# The drop-in keel writes from database.server. The test never writes it;
+# it reads it back, because a file keel says it wrote is a file that has
+# to be there.
+BT_REPL_CNF="etc/mysql/mariadb.conf.d/99-keel-database.cnf"
+# The secret the description names for the replication account. One value
+# per run, written into every node, because both ends of a pair hold the
+# same credential and an operator deploys one description to both.
+BT_REPL_SECRET="/etc/keel/secrets/app_password"
 BT_REPL_RUNNING_QUERY="SHOW GLOBAL STATUS LIKE 'Slave_running'"
 BT_REPL_RUNNING_ANSWER=ON
+# What proves the refusal on a real machine: a database that is nobody's
+# business but the operator's, created on the node that is about to be
+# told to become a replica.
+BT_REPL_HELD_DB=operatordata
+BT_REPL_REFUSED="refused: "
+BT_APPLY_FAILED=16
 # The marker column is VARCHAR(64), so a longer value would be truncated on
 # the way in and the comparison on the replica would fail for a reason that
 # has nothing to do with replication.
@@ -108,6 +118,9 @@ options:
                         with --roles
   --nodes-report FILE   write the topology, one "INDEX NAME ROLE ADDRESS"
                         per line, for the workflow's job summary
+  --keel-deb FILE       install this locally built keel package into every
+                        node once it has booted, for proving a keel that no
+                        published layer carries yet
   --keep                leave the containers running for inspection
   -h, --help            this text
 USAGE
@@ -133,7 +146,8 @@ bt_is_container_name() {
 }
 
 # Sets BT_APPLIANCE, BT_TIMEOUT, BT_INTERVAL, BT_BRIDGE, BT_LAYERS_DIR,
-# BT_CACHE_DIR, BT_LXC_PATH, BT_SPEC, BT_KEEP, BT_NAME and BT_ROOTFS.
+# BT_CACHE_DIR, BT_LXC_PATH, BT_SPEC, BT_KEEL_DEB, BT_KEEP, BT_NAME and
+# BT_ROOTFS.
 # Returns 0 when parsed, 2 after printing the usage, 1 on a bad argument
 # (message on stderr).
 bt_parse_args() {
@@ -149,6 +163,7 @@ bt_parse_args() {
     BT_ROLES=""
     BT_NODES_LIB=""
     BT_NODES_REPORT=""
+    BT_KEEL_DEB=""
     BT_KEEP=0
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -160,7 +175,7 @@ bt_parse_args() {
                 [ "$1" = --timeout ] && BT_TIMEOUT=$2 || BT_INTERVAL=$2
                 shift
                 ;;
-            --bridge|--layers-dir|--cache-dir|--lxc-path|--name|--spec|--roles|--nodes-lib|--nodes-report)
+            --bridge|--layers-dir|--cache-dir|--lxc-path|--name|--spec|--roles|--nodes-lib|--nodes-report|--keel-deb)
                 [ -n "${2-}" ] || {
                     echo "boot-test: $1 needs a value" >&2
                     return 1
@@ -175,6 +190,7 @@ bt_parse_args() {
                     --roles) BT_ROLES=$2 ;;
                     --nodes-lib) BT_NODES_LIB=$2 ;;
                     --nodes-report) BT_NODES_REPORT=$2 ;;
+                    --keel-deb) BT_KEEL_DEB=$2 ;;
                 esac
                 shift
                 ;;
@@ -470,21 +486,24 @@ bt_diff_verdict() {
     esac
 }
 
-# --- the replication phase, by hand ----------------------------------
+# --- the replication phase, driven by each node's description --------
 #
-# Everything below is the gate proving it can see replication work. None of
-# it is a feature of this layer: the appliance's own console modes will own
-# the drop-in, the accounts and the CHANGE MASTER, and when they do these
-# helpers are what their test is written against. Listed in tests/README.md
-# as hand configuration.
+# What used to be here was hand configuration: a drop-in, two accounts and
+# a CHANGE MASTER, each listed in tests/README.md as something the
+# appliance would later own. It owns them now. The test writes the role
+# into the node's own instance description and runs
+# `keel spec apply --system-only`; keel writes the drop-in, grants the
+# replication account from the prefix the description names, and starts
+# replication. What is left here is the description to write and the
+# questions the servers are asked afterwards.
 
-bt_repl_host_pattern() {
-    # bt_repl_host_pattern ADDRESS: the host string a MariaDB account is
-    # created for, given one node's global IPv6 address: the /64 the bridge
-    # advertises, as MariaDB's own wildcard. A prefix and not the single
-    # address on purpose (decision 0013, credentials and trust between
-    # nodes): with IPv6 and no NAT a fleet's /64 is stable while a list of
-    # addresses goes stale on every rebuild.
+bt_repl_prefix() {
+    # bt_repl_prefix ADDRESS: the /64 one node lives on, from its global
+    # IPv6 address. The form docs/spec.md of keel tells an operator to
+    # prefer, and the one the description carries: with IPv6 and no NAT a
+    # fleet's /64 is stable while a list of addresses goes stale on every
+    # rebuild. keel turns it into the host pattern MariaDB holds, which is
+    # the translation this phase exists to exercise.
     local addr=${1-}
     local -a parts
     if ! bt_is_global_ipv6 "$addr"; then
@@ -497,111 +516,169 @@ bt_repl_host_pattern() {
         echo "boot-test: '$addr' has no written out /64 prefix to authorise" >&2
         return 1
     fi
-    printf '%s:%s:%s:%s:%%\n' "${parts[0]}" "${parts[1]}" "${parts[2]}" "${parts[3]}"
+    printf '%s:%s:%s:%s::/64\n' "${parts[0]}" "${parts[1]}" "${parts[2]}" "${parts[3]}"
 }
 
 bt_is_sql_literal() {
     # A value that can go inside single quotes in SQL as it stands. The
-    # passwords this test generates are letters and digits, so anything
-    # holding a quote, a backslash or a control character is refused rather
-    # than escaped: a test that has to escape is a test building SQL out of
-    # something it did not generate.
+    # values this test puts in a statement are ones it generated itself,
+    # so anything holding a quote, a backslash or a control character is
+    # refused rather than escaped: a test that has to escape is a test
+    # building SQL out of something it did not generate. keel escapes,
+    # because the credential it handles came from a file it did not write.
     local value=${1-}
     [ -n "$value" ] || return 1
     [[ $value =~ ^[A-Za-z0-9:%._-]+$ ]] || return 1
     return 0
 }
 
-bt_repl_cnf() {
-    # bt_repl_cnf ROLE INDEX ADDRESS: the MariaDB drop-in one node gets.
+bt_repl_section() {
+    # bt_repl_section ROLE ADDRESS PEER: the database.server block this
+    # node's description gains, appended to tests/instance.yaml, which
+    # declares no database section of its own.
     #
-    # Three things the appliance will own. The server id, unique per node,
-    # which is the node index. The bind address, which gains this node's
-    # own literal global address beside the loopback pair the layer ships:
+    # listen is this node's own loopback pair plus its own global address:
     # a replica cannot reach a primary listening on ::1 only, and opening
-    # the port is exactly the decision the console's Primary screen makes.
-    # And the binary log, on the primary alone, because that is what a
-    # replica reads; a replica that is never itself a primary needs none.
-    #
-    # skip_name_resolve is here for the reason docs/traps.md gives for
-    # literal addresses: with it off, MariaDB matches an account against
-    # whatever reverse DNS returns for the client, which on a bridge with
-    # no PTR records fails quietly and differently per node.
-    local role=${1-} index=${2-} addr=${3-}
+    # the port is exactly the decision the console's screens make. PEER is
+    # the other node's address: on a primary it becomes the prefix
+    # authorised to replicate, on a replica the endpoint replicated from.
+    # Neither configures the other machine; each is this node saying what
+    # it will accept or where it will look.
+    local role=${1-} addr=${2-} peer=${3-} prefix
     if [ "$role" != "$BT_ROLE_PRIMARY" ] && [ "$role" != "$BT_ROLE_REPLICA" ]; then
         echo "boot-test: '$role' is neither $BT_ROLE_PRIMARY nor $BT_ROLE_REPLICA" >&2
         return 1
     fi
-    if [[ ! $index =~ ^[1-9][0-9]*$ ]]; then
-        echo "boot-test: '$index' is not a server id" >&2
+    if ! bt_is_global_ipv6 "$addr" || ! bt_is_global_ipv6 "$peer"; then
+        echo "boot-test: a node and its peer need global IPv6 addresses" >&2
         return 1
     fi
-    if ! bt_is_global_ipv6 "$addr"; then
-        echo "boot-test: '$addr' is not a global IPv6 address to listen on" >&2
-        return 1
-    fi
-    printf '%s\n' '# Written by tests/boot-test.sh for the replication phase.'
-    printf '%s\n' '[mysqld]'
-    printf 'server_id = %s\n' "$index"
-    printf 'bind-address = %s,127.0.0.1,%s\n' "$BT_DB_HOST" "$addr"
-    printf 'skip_name_resolve = ON\n'
+    printf '%s\n' 'database:'
+    printf '%s\n' '  server:'
+    printf '%s\n' '    engine: mariadb'
+    printf '    role: %s\n' "$role"
+    printf '    listen: ["%s", "127.0.0.1", "%s"]\n' "$BT_DB_HOST" "$addr"
+    printf '%s\n' '    replication:'
     if [ "$role" = "$BT_ROLE_PRIMARY" ]; then
-        printf 'log_bin = %s\n' "$BT_REPL_BINLOG"
-        printf 'binlog_format = ROW\n'
+        prefix=$(bt_repl_prefix "$peer") || return 1
+        printf '      allowed_from: ["%s"]\n' "$prefix"
+    else
+        printf '%s\n' '      primary:'
+        printf '        host: "%s"\n' "$peer"
+        printf '        port: %s\n' "$BT_DB_PORT"
     fi
+    printf '%s\n' '      secret:'
+    printf '        file: %s\n' "$BT_REPL_SECRET"
 }
 
-bt_repl_account_sql() {
-    # bt_repl_account_sql USER HOST GRANT PASSWORD: an account the
-    # replication phase needs, idempotent so a retry and a replicated copy
-    # of the same statement both pass. The password is in the statement,
-    # which is why this goes to the client on standard input and never in
-    # an argument vector.
-    local user=${1-} host=${2-} grant=${3-} password=${4-}
+bt_apply_verdict() {
+    # bt_apply_verdict CODE OUTPUT: what `keel spec apply --system-only`
+    # did to the database of one node. 0 is converged; 16 with a refusal
+    # in the output is keel declining to do something, which is a
+    # different thing from a failure and is quoted rather than summarised.
+    local code=${1-} output=${2-} refusal
+    refusal=$(printf '%s' "$output" | sed -n "s/.*$BT_REPL_REFUSED//p" | head -1)
+    if [ "$code" = 0 ]; then
+        echo "boot-test: keel converged the declared role"
+        return 0
+    fi
+    if [ "$code" = "$BT_APPLY_FAILED" ] && [ -n "$refusal" ]; then
+        echo "boot-test: keel refused: $refusal" >&2
+        return 1
+    fi
+    echo "boot-test: keel spec apply --system-only failed with exit $code" >&2
+    return 1
+}
+
+bt_refusal_verdict() {
+    # bt_refusal_verdict CODE OUTPUT: the other way round. Here the
+    # refusal is what is being proved, so a run that went ahead and
+    # configured the replica is the failure. This is the one property of
+    # the feature that loses data if it is wrong (handbook decision 0013),
+    # so the gate asserts it on a real server and not only in unit tests.
+    local code=${1-} output=${2-}
+    if [ "$code" != "$BT_APPLY_FAILED" ]; then
+        echo "boot-test: apply exited $code over a database that holds data; it must refuse" >&2
+        return 1
+    fi
+    case "$output" in
+        *"$BT_REPL_REFUSED"*"$BT_REPL_HELD_DB"*)
+            echo "boot-test: keel refused to replace the database this server holds"
+            return 0 ;;
+    esac
+    echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB" >&2
+    return 1
+}
+
+bt_dropin_verdict() {
+    # bt_dropin_verdict ROLE TEXT: the drop-in keel says it wrote. Read
+    # back because a file a command claims to have written is a file that
+    # has to be there, and because the binary log is what tells a primary
+    # from a replica in that file.
+    local role=${1-} text=${2-}
+    if [[ $text != *"server_id = "* ]]; then
+        echo "boot-test: the drop-in names no server id" >&2
+        return 1
+    fi
+    case "$role:$text" in
+        "$BT_ROLE_PRIMARY:"*log_bin*)
+            echo "boot-test: the primary has a binary log a replica can read"
+            return 0 ;;
+        "$BT_ROLE_PRIMARY:"*)
+            echo "boot-test: the primary has no binary log" >&2; return 1 ;;
+        "$BT_ROLE_REPLICA:"*log_bin*)
+            echo "boot-test: the replica was given a binary log it does not need" >&2
+            return 1 ;;
+    esac
+    echo "boot-test: the replica needs no binary log of its own"
+    return 0
+}
+
+bt_keel_deb_argv() {
+    # bt_keel_deb_argv NAME: how a locally built keel is installed into a
+    # node that has already booted (--keel-deb). The gate never passes it:
+    # there the keel under test is the one the published layer carries,
+    # which is the whole point of assembling a published layer. It is for
+    # the maintainer proving a keel before the layer that carries it is
+    # published, which is the order this feature had to be done in.
+    local name=${1-}
+    case "$name" in
+        ""|*/*|*[!A-Za-z0-9._+-]*)
+            echo "boot-test: '$name' is not a package file name" >&2
+            return 1 ;;
+    esac
+    printf '%s\n' dpkg --install "/root/$name"
+}
+
+bt_repl_admin_sql() {
+    # bt_repl_admin_sql USER HOST PASSWORD: a host row for the
+    # administrative account. The one statement this phase still issues by
+    # hand, and it is not part of the replication feature: it exists only
+    # so the proof below can be read from the other machine by an account
+    # the description declares, rather than by something the test invented.
+    # Idempotent, so a retry passes.
+    local user=${1-} host=${2-} password=${3-}
     if ! bt_is_sql_literal "$user" || ! bt_is_sql_literal "$host" \
        || ! bt_is_sql_literal "$password"; then
         echo "boot-test: an account needs a plain user, host and password" >&2
         return 1
     fi
-    if [ "$grant" != 'REPLICATION SLAVE' ] && [ "$grant" != 'ALL PRIVILEGES' ]; then
-        echo "boot-test: '$grant' is not a grant this test makes" >&2
-        return 1
-    fi
     cat <<SQL
 CREATE USER IF NOT EXISTS '$user'@'$host' IDENTIFIED BY '$password';
 ALTER USER '$user'@'$host' IDENTIFIED BY '$password';
-GRANT $grant ON *.* TO '$user'@'$host';
+GRANT ALL PRIVILEGES ON *.* TO '$user'@'$host';
 FLUSH PRIVILEGES;
 SQL
 }
 
-bt_repl_start_sql() {
-    # bt_repl_start_sql USER PASSWORD PRIMARY_ADDRESS PORT: what makes this
-    # node a replica of that one. MASTER_HOST takes the IPv6 literal
-    # unbracketed. GTID rather than a file and a position, which is what
-    # decision 0013 records for MariaDB, and an empty gtid_slave_pos means
-    # "from the start of the primary's binary log", which is correct here
-    # because the primary's log begins when the drop-in above is applied and
-    # the databases are equal at that moment.
-    local user=${1-} password=${2-} addr=${3-} port=${4-}
-    if ! bt_is_sql_literal "$user" \
-       || ! bt_is_sql_literal "$password"; then
-        echo "boot-test: the replication account needs a plain user and password" >&2
-        return 1
-    fi
-    if ! bt_is_global_ipv6 "$addr"; then
-        echo "boot-test: '$addr' is not a global IPv6 address to replicate from" >&2
-        return 1
-    fi
-    case "$port" in ''|*[!0-9]*) echo "boot-test: '$port' is not a port" >&2; return 1 ;; esac
-    cat <<SQL
-STOP SLAVE;
-SET GLOBAL gtid_slave_pos = '';
-CHANGE MASTER TO MASTER_HOST='$addr', MASTER_PORT=$port,
-    MASTER_USER='$user', MASTER_PASSWORD='$password',
-    MASTER_USE_GTID=slave_pos, MASTER_CONNECT_RETRY=2;
-START SLAVE;
-SQL
+bt_held_db_sql() {
+    # The database the operator is supposed to be warned about, created on
+    # the node that is about to be told to become a replica.
+    printf 'CREATE DATABASE IF NOT EXISTS %s;\n' "$BT_REPL_HELD_DB"
+}
+
+bt_drop_held_db_sql() {
+    printf 'DROP DATABASE IF EXISTS %s;\n' "$BT_REPL_HELD_DB"
 }
 
 bt_repl_write_sql() {
