@@ -82,6 +82,13 @@ apt-get install -y --only-upgrade \
 # conf.d/zz-project-packages is where the archive freshness check itself is
 # maintained; this is the minimum, which is what publishing this layer
 # requires.
+#
+# keel 0.3.5 is the floor because the two node gate configures replication
+# from the description on the booted machine: that needs the database section
+# (0.3.0), what inspect and diff read back from it (0.3.1 to 0.3.3), the role
+# configuration apply writes (0.3.4) and promotion (0.3.5). A layer built with
+# keel 0.2.1 answers "database: unknown top level key" and the gate fails, so
+# the floor is the version the layer is published to carry.
 while read -r package floor; do
     installed=$(dpkg-query -W -f '${Version}' "$package")
     dpkg --compare-versions "$installed" ge "$floor" \
@@ -89,13 +96,19 @@ while read -r package floor; do
 done <<EOF
 inithooks 2.3.6+keel4
 confconsole 2.2.3+keel2
-keel 0.2.1
+keel 0.3.5
 EOF
 dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
 
-# The build time package source is not for appliances: remove it, keep the
-# documented, disabled entry for the future signed repository (overlay).
+# The build time package source is not for appliances: remove the source
+# entry, the copy of the archive it names and the keyring the build verified
+# that archive with, and keep the documented, disabled entry for the future
+# signed repository (overlay). The staging key signs whatever the build host
+# produced, so an image that kept it would carry trust in a nightly
+# (tracker#7). common/removelists-final/turnkey removes the same three paths
+# at the end of the build, whatever a recipe does.
 rm -f /etc/apt/sources.list.d/keel-staging.list
+rm -f /etc/apt/keyrings/keel-staging-keyring.asc
 rm -rf /srv/keel-apt
 rm -rf /var/lib/apt/lists/*
 grep -q '^Enabled: no' /etc/apt/sources.list.d/keel.sources

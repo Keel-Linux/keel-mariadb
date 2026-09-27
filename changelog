@@ -1,3 +1,40 @@
+turnkey-mariadb-19.0 (2) turnkey; urgency=low
+
+  * The build verifies the project's own APT archive instead of reading it
+    unverified. The staging distribution has been signed since 2026-09-27, but
+    the build environment had no copy of the public key and the source entry
+    said [trusted=yes], which switches verification off: apt printed
+    "W: OpenPGP signature verification failed ... Missing key
+    8CFD1A4841448B2227341CEB202CACBD0E97090A" and installed inithooks,
+    confconsole and keel anyway. The public half of the staging key is now
+    installed into the build tree as
+    /etc/apt/keyrings/keel-staging-keyring.asc, the source entry names it
+    through signed-by, and apt-get update runs with --error-on=any, so a
+    signature that cannot be checked fails the build instead of warning
+    (tracker#7).
+
+  * bin/keel-archive-check does the same checks itself rather than trusting
+    apt to have complained: the copied package index is the live one, the
+    source entry names the keyring and this distribution, no apt source in
+    the tree says trusted=yes, and the signature on the copied InRelease
+    verifies against the named key with gpgv. It runs where the copy is made
+    and again on the tree that is about to be configured, which is a step
+    where no apt-get update runs at all.
+
+  * conf.d/main removes the keyring with the source entry and the copy of the
+    archive: the staging key signs whatever the build host produced, so an
+    image that kept it would carry trust in a nightly. The removelist
+    common/removelists-final/turnkey takes all three out as well, whatever a
+    recipe does.
+
+  * The floor for keel rises from 0.2.1 to 0.3.5. The two node gate configures
+    replication from the instance description on the booted machine, which
+    needs the database section, the role configuration apply writes and
+    promotion; a layer carrying keel 0.2.1 answers "database: unknown top
+    level key" and the gate fails, as it did on keel-mariadb#10.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 27 Sep 2026 19:30:00 +0000
+
 turnkey-mariadb-19.0 (1) turnkey; urgency=low
 
   * Initial release of the MariaDB database layer for Keel, compatible with
