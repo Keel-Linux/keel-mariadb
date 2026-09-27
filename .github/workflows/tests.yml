@@ -1,0 +1,65 @@
+# Tests of the keel-mariadb layer recipe (decision 0006 point 4):
+#   tests:     the first boot library, the first boot hook and the boot
+#              test's library under bats and kcov, on hosted runners, with
+#              the threshold committed here
+#   appliance: fetch the published layer, verify it, assemble it, boot it
+#              in LXC and run tests/boot-test.sh against it, on the
+#              self-hosted runner
+#   package:   a change that the layer ships needs a changelog entry, so it
+#              can reach a machine
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # Threshold 0 is the bootstrap case of test-shell.yml: there is no
+    # tests/coverage.sh on this branch yet, so the job passes with a notice
+    # and the check exists, which is what lets main be protected from the
+    # first day. It is raised to the measured number when the tests land,
+    # and only ever raised (decision 0006). This job produces the check
+    # "tests / coverage", the required status on main. The job id is part
+    # of that name, so renaming it silently detaches the protection rule.
+    uses: keel-linux/.github/.github/workflows/test-shell.yml@main
+    with:
+      threshold: 0
+  appliance:
+    # The boot test (org-plan section 1): the mariadb layer is fetched from
+    # https://mirror.keellinux.org/layers, verified, assembled into a
+    # scratch rootfs, booted in LXC and checked by tests/boot-test.sh.
+    # Nothing is built there; the build host publishes the layer
+    # (docs/releases-host.md of the keel repository).
+    #
+    # test-appliance.yml targets the labels "self-hosted, keel-lxc"; a job
+    # aimed at a label no runner carries stays queued until GitHub cancels
+    # it after 24 hours, so the reusable workflow's contract is that
+    # callers gate on the organization variable KEEL_LXC_RUNNER
+    # (docs/ci-cd.md section 5 of the keel repository). While the layer is
+    # not published the job skips with a notice and passes. This job
+    # produces the check "appliance / build-and-boot".
+    if: vars.KEEL_LXC_RUNNER == 'true'
+    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
+    with:
+      appliance: mariadb
+      # A layer on core; the workflow checks this against the parent the
+      # published manifest records.
+      parent: core
+      timeout: 60
+  package:
+    # This recipe has no debian/changelog: what bt-layer records in the
+    # manifest is the top entry of ./changelog, which is also what
+    # make-release-deb.py turns into the release package. So that is the
+    # file a change which ships has to bump. This job produces the check
+    # "package / changelog".
+    uses: keel-linux/.github/.github/workflows/require-changelog.yml@main
+    with:
+      changelog: changelog
+      # keel/ is the example instance description, which the layer does not
+      # ship; the rest is the reusable workflow's own default.
+      exempt: '^(tests/|docs/|\.github/|keel/|README|COVERAGE\.md|LICENSE|\.gitignore)'
