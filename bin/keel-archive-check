@@ -41,6 +41,8 @@
 #                       promise until the key inside it is named.
 # KEEL_ARCHIVE_KEYRING  where in TREE the keyring is
 # KEEL_ARCHIVE_LIST     where in TREE the source entry is
+# KEEL_ARCHIVE_PATH     the path an apt source names this archive by, which is
+#                       the archive a trusted=yes is refused for
 #
 # Exit 0 when everything holds, 1 otherwise.
 set -eu
@@ -74,6 +76,9 @@ fatal() {
 [ -n "$KEEL_ARCHIVE_KEY" ] \
     || fatal "KEEL_ARCHIVE_KEY names no key: the archive would be verified against whatever the keyring happens to hold"
 
+# The path an apt source names this archive by, which is what makes a
+# trusted=yes elsewhere in the tree somebody else's business.
+ARCHIVE_PATH="${KEEL_ARCHIVE_PATH:-/srv/keel-apt/repo}"
 index=dists/$dist/main/binary-$arch/Packages
 source_index=$source_repo/$index
 copy=$tree/srv/keel-apt/repo
@@ -95,16 +100,23 @@ if ! cmp -s "$source_index" "$copy_index"; then
     exit 1
 fi
 
-# 2. Nothing in the tree switches verification off. A single trusted=yes
-# anywhere turns every failure below into a warning, which is the defect this
-# check exists for, so it is refused wherever it is written, in either of the
-# two formats apt reads a source in.
+# 2. Nothing in the tree switches verification off for this archive. A single
+# trusted=yes on it turns every failure below into a warning, which is the
+# defect this check exists for, so it is refused in either of the two formats
+# apt reads a source in and in whichever file it is written.
+#
+# Scoped to the sources that name this archive, not to every source in the
+# tree: the captured pool of decision 0012 sets Trusted: yes on purpose, for a
+# file: index generated on this machine from files keel-pool verify checks
+# against the same digests apt does. Refusing that would fail every pinned
+# build. What the pool does is the pool's business; this archive is verified.
 verification_off='trusted *= *yes|^ *Trusted: *yes'
 apt_sources="$tree/etc/apt/sources.list $tree/etc/apt/sources.list.d"
 # shellcheck disable=SC2086 # the two paths are one word each, on purpose
-untrusted=$(grep -rlE "$verification_off" $apt_sources 2>/dev/null || true)
+distrusting=$(grep -rlE "$verification_off" $apt_sources 2>/dev/null || true)
+untrusted=$(echo "$distrusting" | xargs -r grep -lF "$ARCHIVE_PATH" || true)
 [ -z "$untrusted" ] \
-    || fatal "verification is switched off in: $(echo "$untrusted" | tr '\n' ' ')"
+    || fatal "verification is switched off for $ARCHIVE_PATH in: $(echo "$untrusted" | tr '\n' ' ')"
 
 # 3. The source entry names this distribution and the keyring it is verified
 # with. apt takes signed-by from the entry, so the entry is what decides

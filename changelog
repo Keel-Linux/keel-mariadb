@@ -1,3 +1,14 @@
+turnkey-mariadb-19.0 (3) turnkey; urgency=low
+
+  * bin/keel-archive-check refuses a trusted=yes on the project archive rather
+    than on every apt source in the build tree. The captured pool of decision
+    0012 sets Trusted: yes on purpose, for a file: index generated on this
+    machine from files keel-pool verify checks against the same digests apt
+    does, so the wider rule would have failed every pinned build. What the pool
+    does is the pool's business; the project archive is verified (tracker#7).
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Sun, 27 Sep 2026 20:10:00 +0000
+
 turnkey-mariadb-19.0 (2) turnkey; urgency=low
 
   * The build verifies the project's own APT archive instead of reading it
