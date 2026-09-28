@@ -45,7 +45,7 @@ jobs:
     # not published the job skips with a notice and passes. This job
     # produces the check "appliance / build-and-boot".
     if: vars.KEEL_LXC_RUNNER == 'true'
-    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
+    uses: keel-linux/.github/.github/workflows/test-appliance.yml@verify/gate-behaviour
     with:
       appliance: mariadb
       # A layer on core; the workflow checks this against the parent the
