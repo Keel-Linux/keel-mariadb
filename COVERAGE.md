@@ -53,11 +53,16 @@ before any password is set.
 
 ## The appliance gate
 
-`appliance / build-and-boot` runs through the organization's
+`appliance / boot-published-layer` runs through the organization's
 `test-appliance.yml` on the self-hosted `keel-lxc` runner, which fetches
 the published layer from `https://mirror.keellinux.org/layers`, verifies
 it, assembles it, boots **two** containers of it on one bridge and runs
-`tests/boot-test.sh` against them. Nothing is built there.
+`tests/boot-test.sh` against them. Nothing is built there, so what boots is
+the published layer and not this branch: a pull request that changes the
+recipe is not exercised by this check, which is why the job is
+`boot-published-layer` and not the old `build-and-boot`. A layer that has never
+been published fails it rather than passing it (keel-linux/.github pull request
+12).
 
 ### Two nodes, and replication proved (2026-09-27)
 
@@ -123,7 +128,7 @@ on `main` then.
 
 ## Plan
 
-- Publish the layer, then require `appliance / build-and-boot` on `main`.
+- Require `appliance / boot-published-layer` on `main` under its new name.
 - Measure `conf.d/main`. A build time script that runs inside a chroot as
   root is the case decision 0003 splits: the decisions it makes (which
   account, which hosts, which hash) are already in `lib/mariadb.sh` and
