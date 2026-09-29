@@ -160,5 +160,5 @@ DECLARED_PASS=s3cret-from-the-description
     run "$HOOK"
     [ "$status" -eq 1 ]
     [[ "$output" == *"mariadb did not answer after 2 tries"* ]]
-    ! grep -q mysqlconf.py "$CALLS"
+    run ! grep -q mysqlconf.py "$CALLS"
 }

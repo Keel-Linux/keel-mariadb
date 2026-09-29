@@ -513,10 +513,10 @@ DEF
 @test "is_sql_literal: a generated password, and nothing needing an escape" {
     bt_is_sql_literal abcXYZ019
     bt_is_sql_literal 'fc42:5009:ba4b:5ab0:%'
-    ! bt_is_sql_literal ""
-    ! bt_is_sql_literal "it's"
-    ! bt_is_sql_literal 'back\slash'
-    ! bt_is_sql_literal 'two words'
+    run ! bt_is_sql_literal ""
+    run ! bt_is_sql_literal "it's"
+    run ! bt_is_sql_literal 'back\slash'
+    run ! bt_is_sql_literal 'two words'
 }
 
 @test "repl_section: a primary authorises the peer's prefix, not its address" {
