@@ -47,6 +47,7 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     bats tests/mariadb.bats
     bats tests/hook.bats
     bats tests/boot-test.bats
+    bats tests/dbpass.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
 `COVERAGE_DIR=coverage tests/coverage.sh` keeps the kcov reports.

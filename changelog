@@ -1,3 +1,15 @@
+turnkey-mariadb-19.0 (4) turnkey; urgency=medium
+
+  * bin/dbpass.py draws its password box on the terminal. firstboot.d/
+    35mysqlpass reads the script's standard output for DB_PASS=, and dialog
+    draws on standard output, so an interactive first boot froze at the
+    MariaDB password with the box drawn into the hook's pipe (keel-wordpress
+    19.0-3 on Proxmox, 2026-09-30). The answers now go to a copy of that
+    pipe and standard output is the terminal. tests/dbpass.bats runs the
+    script as the hook does, inside a pseudo terminal.
+
+ -- Keel Linux maintainers <admin@keellinux.org>  Wed, 30 Sep 2026 04:15:40 +0000
+
 turnkey-mariadb-19.0 (3) turnkey; urgency=low
 
   * bin/keel-archive-check refuses a trusted=yes on the project archive rather
