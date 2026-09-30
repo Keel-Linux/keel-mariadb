@@ -10,9 +10,12 @@ needs is declared: secrets.db_password of the instance description.
 Syntax: dbpass.py NAME [NAME ...]      NAME is DB_PASS
 """
 
+import os
 import sys
 
 from libinithooks.dialog_wrapper import Dialog
+
+TTY = "/dev/tty"
 
 TITLE = "Keel - First boot configuration"
 
@@ -25,13 +28,32 @@ def ask(name: str, dialog: Dialog) -> str:
     raise SystemExit(f"dbpass.py: unknown value name {name!r}")
 
 
+def answers_out(tty: str = TTY):
+    """The hook's pipe for the answers, with standard output on the terminal
+
+    The hook reads this script's standard output, and dialog draws its
+    screen on standard output: left there, the password box is drawn into
+    the hook's pipe, and the console shows a frozen screen waiting for a
+    password nobody can see (2026-09-30, keel-wordpress on Proxmox). So
+    the pipe is kept on a new descriptor for the KEY=value lines, and
+    standard output, which dialog inherits, becomes the terminal.
+    """
+    answers = os.fdopen(os.dup(sys.stdout.fileno()), "w")
+    terminal = os.open(tty, os.O_WRONLY)
+    os.dup2(terminal, sys.stdout.fileno())
+    os.close(terminal)
+    return answers
+
+
 def main(names: list[str]) -> int:
     if not names:
         print(__doc__, file=sys.stderr)
         return 1
+    answers = answers_out()
     dialog = Dialog(TITLE)
     for name in names:
-        print(f"{name}={ask(name, dialog)}")
+        print(f"{name}={ask(name, dialog)}", file=answers)
+    answers.close()
     return 0
 
 
