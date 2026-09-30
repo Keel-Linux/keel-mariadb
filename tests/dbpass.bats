@@ -44,6 +44,14 @@ run_as_the_hook() {
     [ "$(cat "$OUT")" = "DB_PASS=typed-at-the-console" ]
 }
 
+@test "without any terminal it says so instead of a traceback" {
+    # setsid: no controlling terminal, and standard input is not one either
+    PYTHONPATH="$FAKE" run setsid -w python3 "$DBPASS" DB_PASS < /dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no terminal to draw the dialog on"* ]]
+    [[ "$output" != *"Traceback"* ]]
+}
+
 @test "without a name it prints its usage and fails" {
     PYTHONPATH="$FAKE" run python3 "$DBPASS"
     [ "$status" -eq 1 ]
