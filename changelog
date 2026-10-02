@@ -1,4 +1,4 @@
-turnkey-mariadb-19.0 (4) turnkey; urgency=medium
+turnkey-mariadb-19.0 (5) turnkey; urgency=medium
 
   * The overlay no longer ships /etc/apt/sources.list.d/keel.sources
     (apt.keellinux.org, disabled) or /etc/apt/preferences.d/keel (the Keel
@@ -11,6 +11,10 @@ turnkey-mariadb-19.0 (4) turnkey; urgency=medium
     then fails if any apt source or pin of the image still names the build
     time archive, in place of the check that keel.sources was disabled.
     tests/apt-files.bats checks the recipe.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 02 Oct 2026 17:00:00 +0000
+
+turnkey-mariadb-19.0 (4) turnkey; urgency=medium
 
   * bin/dbpass.py draws its password box on the terminal. firstboot.d/
     35mysqlpass reads the script's standard output for DB_PASS=, and dialog
