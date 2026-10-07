@@ -8,7 +8,7 @@
    loopback, and the first boot hook proves the password it just set */
 mariadb-client
 
-/* project packages, resolved from the build host's staging repository */
+/* project packages, from the Keel archive (archive.keellinux.org) */
 inithooks
 confconsole
 keel
