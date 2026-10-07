@@ -1,0 +1,12 @@
+# gitleaks (keel-linux/.github, security-scan.yml): the default rules, less
+# the value below: KEEL_APT_KEY in the Makefile is the OpenPGP fingerprint of
+# the archive staging signing subkey, public by design (it names the key the
+# keyring must hold), not a secret.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "public OpenPGP fingerprint of the Keel archive staging key"
+regexes = [
+  '''8CFD1A4841448B2227341CEB202CACBD0E97090A''',
+]
