@@ -58,8 +58,9 @@ grep -qx 'bind-address = ::1,127.0.0.1' /etc/mysql/mariadb.conf.d/99-keel-bind.c
 dpkg-query -W -f '${Status}' webmin-mysql | grep -qx 'install ok installed'
 
 # fab-plan-resolve keeps a package the parent layer already carries at the
-# parent's version, so the two core packages are upgraded here from the
-# build time source (keel, new in the plan, was installed from it already).
+# parent's version, so the project's packages are upgraded here, from the
+# Keel archive the parent layer names (overlays/turnkey.d/keel-apt of
+# common; trixie-testing as well when the build has KEEL_APT_TRACK=testing).
 #
 # The overlay of this layer ships /etc/confconsole/services.txt, which is a
 # conffile of confconsole, so dpkg sees it as locally modified and asks what
@@ -67,48 +68,33 @@ dpkg-query -W -f '${Status}' webmin-mysql | grep -qx 'install ok installed'
 # file at the prompt and leaves confconsole "install ok unpacked", which
 # fails this script. Keep the overlay's file without asking.
 export DEBIAN_FRONTEND=noninteractive
+apt-get update --error-on=any
 apt-get install -y --only-upgrade \
     -o Dpkg::Options::=--force-confdef \
     -o Dpkg::Options::=--force-confold \
-    inithooks confconsole
+    inithooks confconsole keel
 
 # A half configured package keeps its new version, so check the state too.
 [[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel \
     | grep -c '^install ok installed$') -eq 3 ]]
 
-# A floor, not a literal: the declarative first boot this layer depends on
-# landed in these versions, and a build that read a stale index would ship
-# a layer whose whole point does not work. keel-nodebb's
-# conf.d/zz-project-packages is where the archive freshness check itself is
-# maintained; this is the minimum, which is what publishing this layer
-# requires.
-#
-# keel 0.3.5 is the floor because the two node gate configures replication
-# from the description on the booted machine: that needs the database section
-# (0.3.0), what inspect and diff read back from it (0.3.1 to 0.3.3), the role
-# configuration apply writes (0.3.4) and promotion (0.3.5). A layer built with
-# keel 0.2.1 answers "database: unknown top level key" and the gate fails, so
-# the floor is the version the layer is published to carry.
-while read -r package floor; do
-    installed=$(dpkg-query -W -f '${Version}' "$package")
-    dpkg --compare-versions "$installed" ge "$floor" \
-        || { echo "$package $installed is older than $floor" >&2; exit 1; }
-done <<EOF
-inithooks 2.3.6+keel4
-confconsole 2.2.3+keel2
-keel 0.3.5
-EOF
+# Not a floor and not a literal: each of the three is installed at the
+# version the Keel archive offers as its candidate, from the suite of the
+# track this build reads. A build that read a stale index, or any other
+# source, stops here instead of shipping a layer that is not what the
+# archive says it is. bin/keel-project-packages was copied into the tree
+# for this (Makefile, root.patched/pre) and leaves with it.
+/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel
+rm -rf /usr/local/lib/keel-build
 dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
 
-# The build time package source is not for appliances: remove the source
-# entry, the copy of the archive it names and the keyring the build verified
-# that archive with, and keep the documented, disabled entry for the future
-# signed repository (overlay). The staging key signs whatever the build host
-# produced, so an image that kept it would carry trust in a nightly
-# (tracker#7). common/removelists-final/turnkey removes the same three paths
-# at the end of the build, whatever a recipe does.
-rm -f /etc/apt/sources.list.d/keel-staging.list
-rm -f /etc/apt/keyrings/keel-staging-keyring.asc
-rm -rf /srv/keel-apt
+# No build time package source exists any more, and none may reach the
+# image: nothing the image keeps may name the build host's old staging
+# archive, its pin or its keyring, and the apt lists are not shipped.
 rm -rf /var/lib/apt/lists/*
-grep -q '^Enabled: no' /etc/apt/sources.list.d/keel.sources
+if grep -rlsE 'trixie-staging|/srv/keel-apt|l=Keel Linux staging|keel-staging' /etc/apt/sources.list \
+    /etc/apt/sources.list.d /etc/apt/preferences /etc/apt/preferences.d /etc/apt/keyrings; then
+    echo "the apt files above name the build host's staging archive" >&2
+    exit 1
+fi
+[ ! -e /usr/local/lib/keel-build ]

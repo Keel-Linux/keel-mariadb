@@ -1,3 +1,29 @@
+turnkey-mariadb-19.0 (5) turnkey; urgency=medium
+
+  * The project's packages (inithooks, confconsole, keel) come from the
+    Keel archive, archive.keellinux.org, like every other Keel package,
+    through the source and the 990 pin the parent layer carries
+    (Keel-Linux/common#30; trixie-testing as well with KEEL_APT_TRACK=
+    testing, common#32). The build host's staging archive is gone from the
+    recipe: the Makefile no longer copies it into the bootstrap, and
+    conf.d/main no longer pins it. It held inithooks 2.3.6+keel5,
+    confconsole 2.2.3+keel2 and keel 0.3.5, and its pin at 1001 would have
+    downgraded the layer to them. bin/keel-archive-check, which verified
+    that copy, goes with it.
+  * conf.d/main upgrades the three from the archive and then proves each is
+    installed at apt's candidate, from the Keel archive, in the suite of the
+    track (bin/keel-project-packages, copied into the tree for the build
+    only), in place of the version floors.
+  * The overlay no longer ships /etc/apt/sources.list.d/keel.sources
+    (apt.keellinux.org, disabled) or /etc/apt/preferences.d/keel (the Keel
+    origin at 1001). At 1001 apt downgraded every package newer than the
+    archive's (tracker#23), and both files, at the paths common uses, would
+    override the source and the 990 pin common ships. The build fails if any
+    apt file of the image still names the staging archive.
+    tests/apt-files.bats and tests/project-packages.bats check the recipe.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 02 Oct 2026 17:00:00 +0000
+
 turnkey-mariadb-19.0 (4) turnkey; urgency=medium
 
   * bin/dbpass.py draws its password box on the terminal. firstboot.d/
