@@ -109,6 +109,17 @@ cleanup() {
     for container in "${names[@]}"; do
         rm -rf "$(node_dir "$container")"
     done
+    # the last line of a failed run names the step it failed in, so the
+    # job's log ends by saying where, after the logs that say what
+    if [ "$rc" -ne 0 ]; then
+        bt_step_failed "$rc" "$BT_STEP" >&2 || true
+    fi
+}
+step() {
+    # step NAME TEXT: the step the run is in, in the log and in the
+    # failure line cleanup adds (lib, bt_step)
+    bt_step "$1" "$2"
+    log "step $BT_STEP"
 }
 # EXIT covers the normal end and every failure. The other two turn a signal
 # into an exit, so a cancelled run tears down here too rather than relying
@@ -320,6 +331,14 @@ fi
 # which is what the console's Primary and Replica screens do. What is
 # asserted afterwards is the outcome: what the servers say they are, and a
 # row written on one turning up on the other.
+#
+# The order: the primary converges first, and the replica reaches it,
+# before the replica is applied at all, the refusal included. keel checks
+# that the primary answers as the replication account before it looks at
+# the replica's data, so a replica applied first is refused for the
+# primary's silence and the refusal over data is never asked (run
+# 37838543320, 2026-10-08: "the primary [...]:3306 did not answer as
+# 'repl'"). Each step is named (step), and a failure's last line names it.
 primary=$(btn_role_node "$topology" "$BT_ROLE_PRIMARY")
 replica=$(btn_role_node "$topology" "$BT_ROLE_REPLICA")
 primary_addr=$(node_addr "$primary")
@@ -349,6 +368,7 @@ apply_node() {
 #     authorises (primary) or the endpoint it replicates from (replica).
 #     Written into both paths the first boot reads, so the description on
 #     the machine is the description keel acts on.
+step 8a "each node's description declares its role"
 for pair in "$primary $replica" "$replica $primary"; do
     read -r container peer <<< "$pair"
     rootfs=$(node_rootfs "$container")
@@ -360,11 +380,35 @@ for pair in "$primary $replica" "$replica $primary"; do
     log "$container: description now declares $(node_role "$container")"
 done
 
-# 8b. The refusal, proved on a real server before anything is configured.
-#     The replica is given a database of its own first. Becoming a replica
-#     replaces it, so keel must refuse and change nothing; this is the one
-#     property of the feature that loses data if it is wrong, and decision
-#     0013 is the reason it is asserted here and not only in unit tests.
+# 8b. The primary first: it must hold its authorization, its binary log
+#     and its listening address before the replica asks it anything, the
+#     refusal included, since keel asks the primary before it looks at the
+#     replica's data.
+step 8b "the primary converges first"
+apply_node "$primary"
+bt_apply_verdict "$apply_code" "$apply_output"
+dropin=$(lxc attach "$primary" -- cat "/$BT_REPL_CNF")
+printf '%s\n' "$dropin"
+bt_dropin_verdict "$BT_ROLE_PRIMARY" "$dropin"
+
+# 8c. The primary's database answers from the replica, over IPv6, at a
+#     literal address. Until this passes, nothing the replica is told can
+#     be asserted at all. The other direction comes after the replica's
+#     own apply (8g), which is what gives it its listening address.
+step 8c "the replica reaches the primary's database"
+mapfile -t probe < <(btn_tcp_probe_argv "$primary_addr" "$BT_DB_PORT")
+bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" \
+    "$primary to answer on [$primary_addr]:$BT_DB_PORT from $replica" \
+    lxc attach "$replica" -- "${probe[@]}"
+log "$replica reaches $primary on [$primary_addr]:$BT_DB_PORT"
+
+# 8d. The refusal, proved on a real server with the primary answering, so
+#     the data is the only thing left to refuse over. The replica is given
+#     a database of its own first. Becoming a replica replaces it, so keel
+#     must refuse and change nothing; this is the one property of the
+#     feature that loses data if it is wrong, and decision 0013 is the
+#     reason it is asserted here and not only in unit tests.
+step 8d "the refusal: a replica that holds data is declined"
 bt_held_db_sql | lxc attach "$replica" -- mysql
 log "$replica: holds the database $BT_REPL_HELD_DB, which a replica would replace"
 apply_node "$replica"
@@ -378,44 +422,36 @@ fi
 log "$replica: nothing was configured, $BT_REPL_HELD_DB is untouched"
 bt_drop_held_db_sql | lxc attach "$replica" -- mysql
 
-# 8c. The primary first: it must hold its authorization and its binary log
-#     before the replica connects.
-apply_node "$primary"
-bt_apply_verdict "$apply_code" "$apply_output"
-dropin=$(lxc attach "$primary" -- cat "/$BT_REPL_CNF")
-printf '%s\n' "$dropin"
-bt_dropin_verdict "$BT_ROLE_PRIMARY" "$dropin"
-
-# 8d. Each node's database answers from the other one, over IPv6, at a
-#     literal address. Until this passes, nothing about a pair of machines
-#     can be asserted at all.
-for pair in "$primary $replica $replica_addr" "$replica $primary $primary_addr"; do
-    read -r from to to_addr <<< "$pair"
-    mapfile -t probe < <(btn_tcp_probe_argv "$to_addr" "$BT_DB_PORT")
-    bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" \
-        "$to to answer on [$to_addr]:$BT_DB_PORT from $from" \
-        lxc attach "$from" -- "${probe[@]}"
-    log "$from reaches $to on [$to_addr]:$BT_DB_PORT"
-done
-
 # 8e. A host row for the administrative account on the replica. The one
 #     piece of hand configuration left, and it is not part of the feature:
 #     it exists only so the proof below can be read from the other machine
 #     by an account the description declares.
+step 8e "the administrative account's host row on the replica"
 bt_repl_admin_sql "$BT_DB_USER" "$primary_pattern" "$declared_password" \
     | lxc attach "$replica" -- mysql
 log "$replica: '$BT_DB_USER'@'$primary_pattern' may read it"
 
 # 8f. Now the replica, over a database that holds nothing.
+step 8f "the replica converges"
 apply_node "$replica"
 bt_apply_verdict "$apply_code" "$apply_output"
 dropin=$(lxc attach "$replica" -- cat "/$BT_REPL_CNF")
 printf '%s\n' "$dropin"
 bt_dropin_verdict "$BT_ROLE_REPLICA" "$dropin"
 
-# 8g. Ask the servers what they are, rather than reading back the files
+# 8g. The replica's database answers from the primary, now that its apply
+#     gave it its listening address: the row of 8j is read that way.
+step 8g "the primary reaches the replica's database"
+mapfile -t probe < <(btn_tcp_probe_argv "$replica_addr" "$BT_DB_PORT")
+bt_wait_for "$BT_TIMEOUT" "$BT_INTERVAL" \
+    "$replica to answer on [$replica_addr]:$BT_DB_PORT from $primary" \
+    lxc attach "$primary" -- "${probe[@]}"
+log "$primary reaches $replica on [$replica_addr]:$BT_DB_PORT"
+
+# 8h. Ask the servers what they are, rather than reading back the files
 #     keel wrote (docs/traps.md, "asserting the configuration is not
 #     asserting the behaviour").
+step 8h "the replica reports replication running"
 running=""
 replication_running() {
     running=$(lxc attach "$replica" -- mysql --batch --skip-column-names \
@@ -430,10 +466,11 @@ granted=$(lxc attach "$primary" -- mysql --batch --skip-column-names \
     --execute="SELECT Host FROM mysql.user WHERE User = '$BT_REPL_USER'")
 log "$primary: '$BT_REPL_USER' is granted from $(printf '%s' "$granted" | tr '\n' ' ')"
 
-# 8h. No drift on either node: the description says what the machines are,
+# 8i. No drift on either node: the description says what the machines are,
 #     which is the whole claim of this phase. It runs here and not before,
 #     because before the apply the descriptions declared a role neither
 #     machine was in yet.
+step 8i "keel diff on both nodes, no drift"
 for container in "$primary" "$replica"; do
     set +e
     lxc attach "$container" -- keel diff
@@ -442,11 +479,12 @@ for container in "$primary" "$replica"; do
     bt_diff_verdict "$diff_code"
 done
 
-# 8i. Write on the primary, read on the replica. The value is generated on
+# 8j. Write on the primary, read on the replica. The value is generated on
 #     the host for this run alone, written on one machine by the
 #     administrative account with its declared password and read back from
 #     the other machine over IPv6, so the same value appearing there can
 #     only mean replication carried it.
+step 8j "a row written on the primary is read on the replica"
 marker=$(bt_random_password)
 mapfile -t writer < <(bt_db_argv "$BT_DB_USER" "$BT_DB_HOST" "$BT_DB_PORT" \
     "$(bt_repl_write_sql "$marker" | tr '\n' ' ')")

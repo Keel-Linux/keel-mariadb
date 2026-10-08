@@ -571,10 +571,54 @@ DEF
     [[ $output == *"it must refuse"* ]]
 }
 
-@test "refusal_verdict: a refusal about something else is not this one" {
+@test "refusal_verdict: a refusal about something else is not this one, and is quoted" {
     run bt_refusal_verdict 16 "x: refused: no machine-id"
     [ "$status" -eq 1 ]
-    [[ $output == *"said nothing about operatordata"* ]]
+    [[ $output == *"said nothing about operatordata; it refused for another reason: no machine-id"* ]]
+}
+
+# run 37838543320: the replica applied before the primary had converged
+# was refused for the primary's silence, which proves nothing about data
+@test "refusal_verdict: the primary's silence is quoted as the reason, not mistaken for the data refusal" {
+    run bt_refusal_verdict 16 "apply --system-only: 0 change(s), 1 failed
+database.server.replication.primary: refused: the primary [fc42::1]:3306 did not answer as 'repl' (ERROR 2002). The replica cannot be seeded, so nothing was dropped"
+    [ "$status" -eq 1 ]
+    [[ $output == *"said nothing about operatordata; it refused for another reason: the primary [fc42::1]:3306 did not answer as 'repl'"* ]]
+}
+
+@test "refusal_verdict: exit 16 with no refusal line at all says so" {
+    run bt_refusal_verdict 16 "apply --system-only: 0 change(s), 1 failed"
+    [ "$status" -eq 1 ]
+    [[ $output == *"said nothing about operatordata, and gave no refusal at all"* ]]
+}
+
+# the step the run is in, for the failure line the teardown adds
+
+@test "step: records the step the run is in, name and text" {
+    bt_step 8b "the primary converges first"
+    [ "$BT_STEP" = "8b, the primary converges first" ]
+    bt_step 8d "the refusal"
+    [ "$BT_STEP" = "8d, the refusal" ]
+}
+
+@test "step: refuses a step with no name or no text" {
+    run bt_step "" "text"
+    [ "$status" -eq 1 ]
+    [[ $output == *"a step needs a name and a text"* ]]
+    run bt_step 8b ""
+    [ "$status" -eq 1 ]
+}
+
+@test "step_failed: names the step on a failure, nothing on success or before the first step" {
+    run bt_step_failed 1 "8d, the refusal: a replica that holds data is declined"
+    [ "$status" -eq 0 ]
+    [ "$output" = "boot-test: FAILED (exit 1) in step 8d, the refusal: a replica that holds data is declined" ]
+    run bt_step_failed 0 "8d, the refusal"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    run bt_step_failed 1 ""
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
 }
 
 @test "dropin_verdict: the primary has a binary log and the replica has none" {

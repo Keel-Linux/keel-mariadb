@@ -606,7 +606,15 @@ bt_refusal_verdict() {
     # configured the replica is the failure. This is the one property of
     # the feature that loses data if it is wrong (handbook decision 0013),
     # so the gate asserts it on a real server and not only in unit tests.
-    local code=${1-} output=${2-}
+    #
+    # A refusal for another reason is not this one, and is quoted: keel
+    # refuses a replica whose primary does not answer as the replication
+    # account before it looks at the data, so a run that asks this before
+    # the primary has converged gets that refusal and proves nothing about
+    # the data (run 37838543320, 2026-10-08). The main converges the
+    # primary first for that reason, and this line says what happened when
+    # the order is wrong again.
+    local code=${1-} output=${2-} refusal
     if [ "$code" != "$BT_APPLY_FAILED" ]; then
         echo "boot-test: apply exited $code over a database that holds data; it must refuse" >&2
         return 1
@@ -616,8 +624,41 @@ bt_refusal_verdict() {
             echo "boot-test: keel refused to replace the database this server holds"
             return 0 ;;
     esac
-    echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB" >&2
+    refusal=$(printf '%s' "$output" | sed -n "s/.*$BT_REPL_REFUSED//p" | head -1)
+    if [ -n "$refusal" ]; then
+        echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB; it refused for another reason: $refusal" >&2
+    else
+        echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB, and gave no refusal at all" >&2
+    fi
     return 1
+}
+
+# The step the run is in, for the one line the teardown adds to a failure:
+# the job's log then names the phase and the step that failed instead of
+# ending on the last command's own words.
+BT_STEP=""
+
+bt_step() {
+    # bt_step NAME TEXT: records the step the run is in as "NAME, TEXT";
+    # refuses an empty name or text, since a failure that names nothing is
+    # what this exists to prevent. Run it in the shell that keeps BT_STEP,
+    # not in a command substitution.
+    local name=${1-} text=${2-}
+    if [ -z "$name" ] || [ -z "$text" ]; then
+        echo "boot-test: a step needs a name and a text" >&2
+        return 1
+    fi
+    BT_STEP="$name, $text"
+}
+
+bt_step_failed() {
+    # bt_step_failed CODE STEP: the failure line, when there is a failure
+    # and a step to name. Nothing on exit 0, nothing before the first step.
+    local code=${1-} step=${2-}
+    if [ "$code" = 0 ] || [ -z "$step" ]; then
+        return 1
+    fi
+    printf 'boot-test: FAILED (exit %s) in step %s\n' "$code" "$step"
 }
 
 bt_dropin_verdict() {
