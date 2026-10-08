@@ -1,3 +1,28 @@
+turnkey-mariadb-19.0 (7) turnkey; urgency=medium
+
+  * The image ships the appliance manifest of Keel MariaDB,
+    /usr/share/keel/appliances/mariadb.yaml, from the new package
+    keel-mariadb (packages/keel-mariadb, handbook decision 0041), installed
+    by plan/main from the Keel archive as keel-core and keel-web are. On
+    19.0-5 only core.yaml existed, so a description saying appliance.name:
+    mariadb was refused ("not an installed appliance under
+    /usr/share/keel") and keel inspect inferred core (#25). The manifest:
+    base core, whose five overlays (installer, wireguard, etcd, crowdsec,
+    vip) it inherits with their defaults and adds none; mariadb.service on
+    3306 as a mesh port with Monit's mysql check; the db_password secret,
+    generated if asked and shared by a pair; the db_user option, default
+    admin. A description can now declare the pair of docs/replication.md,
+    appliance.vip and database.server.
+  * conf.d/main proves keel-mariadb installed at the archive's candidate
+    with the other project packages, and runs keel manifest validate
+    mariadb on the built tree, so a manifest the booted machine would refuse
+    fails the build. keel/instance.example.yaml names the appliance, the
+    mode and the five overlays of a simple installation.
+  * tests/package.bats builds and reads the package back, in the new check
+    "packages / build"; tests/coverage.sh leaves it out of the kcov run.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Thu, 08 Oct 2026 21:00:00 +0000
+
 turnkey-mariadb-19.0 (6) turnkey; urgency=medium
 
   * firstboot.d/35mysqlpass follows inithooks' rule for a first boot nobody

@@ -1,0 +1,31 @@
+manifest_version: 1
+kind: appliance
+name: mariadb
+title: Keel MariaDB
+summary: The MariaDB database layer on Keel Core, alone or as a replicated pair (0047, 0049)
+base: core
+# The overlays are Core's, inherited with their states (installer, wireguard,
+# etcd, crowdsec, vip): this layer adds none, and a spec that names it writes
+# all five out (0027).
+processes:
+  - name: mariadb
+    unit: mariadb.service
+    # ::1 and 127.0.0.1 as the layer ships it; on a pair database.server.listen
+    # adds the node's overlay address and the VIP, so 3306 is a mesh port: on
+    # the WireGuard interface in cloud advanced, never on the uplink.
+    listen: [{port: 3306, protocol: tcp, expose: mesh}]
+checks:
+  - {name: mariadb, process: mariadb, type: protocol, protocol: mysql,
+     address: loopback, port: 3306, on_failure: restart}
+secrets:
+  - name: db_password
+    description: The MariaDB administrative account, set at the first boot from DB_PASS
+    generate: allowed
+    # the mysql database replicates with the rest: a pair holds one value
+    shared: true
+options:
+  - name: db_user
+    type: string
+    default: admin
+    # a name that needs no quoting in a GRANT, the rule of lib/mariadb.sh
+    pattern: '^[A-Za-z_][A-Za-z0-9_-]*$'

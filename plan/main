@@ -12,3 +12,10 @@ mariadb-client
 inithooks
 confconsole
 keel
+
+/* The appliance manifest of Keel MariaDB (handbook decision 0041), from
+   packages/keel-mariadb: /usr/share/keel/appliances/mariadb.yaml, so a spec
+   may say appliance.name: mariadb and declare the pair of
+   docs/replication.md. It depends on keel-core, which the parent layer
+   carries, and on mariadb-server, which turnkey/mysql brings. */
+keel-mariadb

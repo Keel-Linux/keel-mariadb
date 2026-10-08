@@ -13,11 +13,12 @@ LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 | tests/lib/boot-test-lib.sh | tests/boot-test.bats (82 tests) | 100 percent (304/304) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts, the node options, and the replication phase: the section each node's description gains, the verdicts on what keel did, the refusal that must happen when the replica holds data (a refusal for another reason quoted, the primary's silence among them), the step names a failed run ends with, and what a node is asked when its database never answered |
 | bin/keel-project-packages | tests/project-packages.bats (6 tests) | 100 percent (32/32) under kcov | inithooks, confconsole and keel are installed at apt's candidate, and the candidate is the Keel archive's in the suite of the track (KEEL_APT_TRACK); a version below the candidate, another source or an unknown track fails |
 | overlay/usr/lib/inithooks/bin/dbpass.py | none | 0 | dialog wrapper, only reached with a terminal attached |
+| packages/keel-mariadb | tests/package.bats (13 tests) | built with `dpkg-buildpackage` and linted clean with lintian on trixie; its fields, files and manifest read back | the check `packages / build`; `conf.d/main` runs `keel manifest validate mariadb` on the built tree |
 | conf.d/main | the build | integration only | build time script, 0004 pragmatic limits |
 | tests/boot-test.sh | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
 Total over the four measured shell files: **99.75 percent (403/404)**,
-124 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
+137 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
 the workflow sets to 95, the lowest measured file. It is only ever raised
 (decision 0006).
 

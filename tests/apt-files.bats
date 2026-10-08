@@ -44,7 +44,7 @@ line() {
     # the backslash is the script's line continuation, matched literally
     # shellcheck disable=SC1003
     upgrade="$(line 'apt-get install -y --only-upgrade \')"
-    check="$(line '/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel')"
+    check="$(line '/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel keel-mariadb')"
     [ -n "$update" ] && [ -n "$upgrade" ] && [ -n "$check" ]
     [ "$update" -lt "$upgrade" ]
     [ "$upgrade" -lt "$check" ]
@@ -55,7 +55,7 @@ line() {
     grep -qF 'install -D -m 755 $(CURDIR)/bin/keel-project-packages $O/root.patched$(KEEL_BUILD_TOOLS)/keel-project-packages;' "$REPO/Makefile"
     grep -qxF 'root.patched/pre += $(_keel_root.patched/pre)' "$REPO/Makefile"
     local check remove lists
-    check="$(line '/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel')"
+    check="$(line '/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel keel-mariadb')"
     remove="$(line 'rm -rf /usr/local/lib/keel-build')"
     lists="$(line 'rm -rf /var/lib/apt/lists/*')"
     [ -n "$remove" ] && [ -n "$lists" ]

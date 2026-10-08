@@ -22,9 +22,40 @@ What is in it
 ``conf.d/main``                         the administrative account, created unusable; the checks; the project package upgrade
 ``overlay/etc/mysql/mariadb.conf.d/``   the bind addresses: ``::1`` and ``127.0.0.1``
 ``overlay/usr/lib/inithooks/``          the first boot hook, its library and its dialog
+``packages/keel-mariadb/``              the appliance manifest and the Debian package that installs it
 ``keel/instance.example.yaml``          the instance description an operator starts from
-``tests/``                              bats for the shell, ``boot-test.sh`` for the machine
+``tests/``                              bats for the shell and the package, ``boot-test.sh`` for the machine
 ======================================  ====================================
+
+The appliance manifest
+----------------------
+
+``packages/keel-mariadb`` is the Debian package of the appliance manifest
+(handbook decision 0041), installed as
+``/usr/share/keel/appliances/mariadb.yaml`` the way ``keel-core`` installs
+``core.yaml`` and ``keel-web`` ``web.yaml``: ``plan/main`` asks for it from
+the Keel archive, and ``conf.d/main`` runs ``keel manifest validate
+mariadb`` on the built tree. Without it the image had only ``core.yaml``, so
+a description saying ``appliance.name: mariadb`` was refused and ``keel
+inspect`` inferred ``core`` (issue #25).
+
+What it says: ``base: core``, whose five overlays (installer, wireguard,
+etcd, crowdsec, vip) it inherits with their default state in each
+installation mode and adds none (an overlay is declared once in a chain,
+rule 16); the server as its one process, ``mariadb.service`` on 3306 as a
+``mesh`` port, since the layer listens on loopback and a pair on the
+overlay, never on the uplink; Monit's ``mysql`` check on the loopback,
+restarting; the ``db_password`` secret, which may be generated and is
+shared by a pair because the ``mysql`` database replicates with the rest;
+and the ``db_user`` option, default ``admin``, with the account name rule
+of ``lib/mariadb.sh``. The first boot hook stays in the overlay and is not
+named under ``hooks.first_boot``, which lists what the package ships.
+
+A description that names the appliance writes the five overlays out
+(decision 0027; an overlay a later package adds takes its manifest default)
+and may declare the pair of ``docs/replication.md`` in the keel
+repository: ``appliance.vip`` and ``database.server``. ``keel/instance.example.yaml``
+shows the simple installation.
 
 Webmin comes from ``core`` and answers on 12321; this layer adds
 ``webmin-mysql``, the module that puts the database in it. Batteries

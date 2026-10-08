@@ -35,8 +35,13 @@ the machine matches the description.
 - `hook.bats`: the hook itself, run for real against scratch directories
   with every system command stubbed, and inithooks' `lib/console.sh` a
   stand-in that answers from `INITHOOKS_UNATTENDED`, as `run` exports it.
-- `coverage.sh`: runs the bats suite under kcov and fails when any measured
-  file is below `COVERAGE_THRESHOLD` (default 95).
+- `package.bats`: builds `packages/keel-mariadb` with `dpkg-buildpackage`
+  and reads back its fields, its files and the manifest. Needs `dpkg-dev`,
+  `debhelper` and `python3-yaml` besides `bats`; it runs in the check
+  `packages / build` (`.github/workflows/packages.yml`), with lintian over
+  the source and binary package, and not under `coverage.sh`.
+- `coverage.sh`: runs every bats suite but `package.bats` under kcov and
+  fails when any measured file is below `COVERAGE_THRESHOLD` (default 95).
 - `instance.yaml`: the description the test container boots from. It
   declares `secrets.db_password` from a file, which is the point of the
   test.
@@ -52,6 +57,19 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
 `COVERAGE_DIR=coverage tests/coverage.sh` keeps the kcov reports.
+
+## The package on a built image
+
+What the manifest does on a machine is proven on an image built from this
+branch, since the boot test boots the published layer: `conf.d/main` runs
+`keel manifest validate mariadb` on the built tree, and on the booted
+container `keel manifest show mariadb --resolved` lists Core's five
+overlays and the server, `keel inspect` writes `appliance.name: mariadb`,
+and a description with `appliance.name: mariadb`, `installation.mode`, the
+five overlays written out and `app.options.db_user` passes `keel spec
+validate`. `tests/instance.yaml` does not name the appliance yet: the gate
+boots the published layer, and 19.0-5 has no manifest to hold the name
+against. It gains the section once a layer with the package is published.
 
 ## The boot test by hand
 

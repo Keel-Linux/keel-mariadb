@@ -78,15 +78,25 @@ apt-get install -y --only-upgrade \
 [[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel \
     | grep -c '^install ok installed$') -eq 3 ]]
 
-# Not a floor and not a literal: each of the three is installed at the
-# version the Keel archive offers as its candidate, from the suite of the
-# track this build reads. A build that read a stale index, or any other
-# source, stops here instead of shipping a layer that is not what the
-# archive says it is. bin/keel-project-packages was copied into the tree
-# for this (Makefile, root.patched/pre) and leaves with it.
-/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel
+# Not a floor and not a literal: each of the three, and keel-mariadb, the
+# layer's own package plan/main asks for, is installed at the version the
+# Keel archive offers as its candidate, from the suite of the track this
+# build reads. A build that read a stale index, or any other source, stops
+# here instead of shipping a layer that is not what the archive says it is.
+# bin/keel-project-packages was copied into the tree for this (Makefile,
+# root.patched/pre) and leaves with it.
+/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel keel-mariadb
 rm -rf /usr/local/lib/keel-build
-dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
+dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel keel-mariadb
+
+# The appliance manifest (packages/keel-mariadb, handbook decision 0041):
+# on an image without it a spec saying appliance.name: mariadb was refused
+# and keel inspect inferred core (#25). It is validated and resolved along
+# its chain on this very tree, with Core's manifest, the overlays' and the
+# units they name in place, so a manifest the booted machine would refuse
+# fails the build instead.
+[ -f /usr/share/keel/appliances/mariadb.yaml ]
+keel manifest validate mariadb
 
 # firstboot.d/35mysqlpass asks nothing on a first boot nobody can answer,
 # by the rule of inithooks' lib/console.sh (2.3.6+keel22 and later), the
