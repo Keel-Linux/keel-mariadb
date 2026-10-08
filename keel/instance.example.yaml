@@ -6,9 +6,11 @@
 #   /etc/keel/secrets/db_password     the MariaDB 'admin' account
 #
 # secrets.db_password is what reaches the database. Leave it out and the
-# first boot has nothing to set the account with: on a headless machine
-# firstboot.d/35mysqlpass says so and fails, and the account stays unable
-# to authenticate, which is the state conf.d/main published it in.
+# first boot has nothing to set the account with: on a first boot nobody can
+# answer (a container nobody is attached to) firstboot.d/35mysqlpass asks
+# nothing, says so in the inithooks log, and the account stays unable to
+# authenticate, which is the state conf.d/main published it in, until the
+# password is declared here or keel-init asks it at a console.
 version: 1
 
 instance:

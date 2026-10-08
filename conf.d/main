@@ -88,6 +88,12 @@ apt-get install -y --only-upgrade \
 rm -rf /usr/local/lib/keel-build
 dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
 
+# firstboot.d/35mysqlpass asks nothing on a first boot nobody can answer,
+# by the rule of inithooks' lib/console.sh (2.3.6+keel22 and later), the
+# one 30rootpass and 31fqdn follow. An inithooks without that library would
+# leave the hook unable to run at all, so the build stops here instead.
+[ -f /usr/lib/inithooks/lib/console.sh ]
+
 # No build time package source exists any more, and none may reach the
 # image: nothing the image keeps may name the build host's old staging
 # archive, its pin or its keyring, and the apt lists are not shipped.

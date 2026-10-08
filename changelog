@@ -1,3 +1,24 @@
+turnkey-mariadb-19.0 (6) turnkey; urgency=medium
+
+  * firstboot.d/35mysqlpass follows inithooks' rule for a first boot nobody
+    can answer (lib/console.sh, INITHOOKS_UNATTENDED, the one 30rootpass and
+    31fqdn follow) instead of testing its own standard input for a terminal.
+    tty1 of an LXC container is a terminal nobody is attached to, so a
+    headless first boot without DB_PASS drew the password box there and
+    waited for good, re-asking when the dialog was killed (#24, two
+    containers of 19.0-5 held for over twelve minutes). When nobody can
+    answer and nothing is declared the hook asks nothing, says so in one
+    line in the inithooks log and the journal, naming the field to declare,
+    and finishes; the account stays as the build published it, unable to
+    authenticate, until the description declares secrets.db_password or
+    keel-init asks it at a console somebody is attached to. When somebody
+    can answer, the dialog is used whatever the hook's standard input is.
+  * conf.d/main fails the build on an inithooks without lib/console.sh
+    (2.3.6+keel22 and later), which would leave the hook unable to run.
+    tests/hook.bats runs the hook with a stand-in for that library.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Thu, 08 Oct 2026 20:30:00 +0000
+
 turnkey-mariadb-19.0 (5) turnkey; urgency=medium
 
   * The project's packages (inithooks, confconsole, keel) come from the
