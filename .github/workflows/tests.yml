@@ -85,5 +85,7 @@ jobs:
     with:
       changelog: changelog
       # keel/ is the example instance description, which the layer does not
-      # ship; the rest is the reusable workflow's own default.
-      exempt: '^(tests/|docs/|\.github/|keel/|README|COVERAGE\.md|LICENSE|\.gitignore)'
+      # ship; evidence/ holds the records of runs on the real platform that
+      # a pull request carries (job URLs, output, timings), which ship
+      # nothing either; the rest is the reusable workflow's own default.
+      exempt: '^(tests/|docs/|\.github/|keel/|evidence/|README|COVERAGE\.md|LICENSE|\.gitignore)'

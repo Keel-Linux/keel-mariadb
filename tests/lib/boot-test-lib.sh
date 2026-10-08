@@ -79,6 +79,10 @@ BT_REPL_RUNNING_ANSWER=ON
 BT_REPL_HELD_DB=operatordata
 BT_REPL_REFUSED="refused: "
 BT_APPLY_FAILED=16
+# What a node is asked when its database never answered the client at all:
+# the server's unit and the first boot's, their last lines in the journal.
+BT_DB_SERVICE=mariadb.service
+BT_DIAGNOSTIC_LINES=60
 # The marker column is VARCHAR(64), so a longer value would be truncated on
 # the way in and the comparison on the replica would fail for a reason that
 # has nothing to do with replication.
@@ -462,6 +466,23 @@ bt_db_verdict() {
     return 1
 }
 
+bt_db_diagnostics_argv() {
+    # bt_db_diagnostics_argv UNIT: what to ask the container when the
+    # database client could not connect at all, one argument per line:
+    # the unit's status and the last lines of its journal and of the first
+    # boot's, so a server that never came up names its reason in the job's
+    # log (status=226/NAMESPACE under a stock LXC profile, a hook that
+    # gave up waiting) instead of the client's "Can't connect" alone
+    # (run 37842190136 on keel-lxc-1, 2026-10-08). Run through a shell
+    # inside the container, since it is two commands.
+    local unit=${1-}
+    case "$unit" in
+        ""|*[!A-Za-z0-9@._-]*) return 1 ;;
+    esac
+    printf '%s\n' sh -c \
+        "systemctl status --no-pager -l $unit; journalctl --no-pager -n $BT_DIAGNOSTIC_LINES -o short-precise -u $unit -u inithooks.service"
+}
+
 bt_db_client_argv() {
     # bt_db_client_argv USER HOST PORT: the client command the boot test
     # runs inside the container, one argument per line. The password is
@@ -606,7 +627,15 @@ bt_refusal_verdict() {
     # configured the replica is the failure. This is the one property of
     # the feature that loses data if it is wrong (handbook decision 0013),
     # so the gate asserts it on a real server and not only in unit tests.
-    local code=${1-} output=${2-}
+    #
+    # A refusal for another reason is not this one, and is quoted: keel
+    # refuses a replica whose primary does not answer as the replication
+    # account before it looks at the data, so a run that asks this before
+    # the primary has converged gets that refusal and proves nothing about
+    # the data (run 37838543320, 2026-10-08). The main converges the
+    # primary first for that reason, and this line says what happened when
+    # the order is wrong again.
+    local code=${1-} output=${2-} refusal
     if [ "$code" != "$BT_APPLY_FAILED" ]; then
         echo "boot-test: apply exited $code over a database that holds data; it must refuse" >&2
         return 1
@@ -616,8 +645,41 @@ bt_refusal_verdict() {
             echo "boot-test: keel refused to replace the database this server holds"
             return 0 ;;
     esac
-    echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB" >&2
+    refusal=$(printf '%s' "$output" | sed -n "s/.*$BT_REPL_REFUSED//p" | head -1)
+    if [ -n "$refusal" ]; then
+        echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB; it refused for another reason: $refusal" >&2
+    else
+        echo "boot-test: apply exited $code but said nothing about $BT_REPL_HELD_DB, and gave no refusal at all" >&2
+    fi
     return 1
+}
+
+# The step the run is in, for the one line the teardown adds to a failure:
+# the job's log then names the phase and the step that failed instead of
+# ending on the last command's own words.
+BT_STEP=""
+
+bt_step() {
+    # bt_step NAME TEXT: records the step the run is in as "NAME, TEXT";
+    # refuses an empty name or text, since a failure that names nothing is
+    # what this exists to prevent. Run it in the shell that keeps BT_STEP,
+    # not in a command substitution.
+    local name=${1-} text=${2-}
+    if [ -z "$name" ] || [ -z "$text" ]; then
+        echo "boot-test: a step needs a name and a text" >&2
+        return 1
+    fi
+    BT_STEP="$name, $text"
+}
+
+bt_step_failed() {
+    # bt_step_failed CODE STEP: the failure line, when there is a failure
+    # and a step to name. Nothing on exit 0, nothing before the first step.
+    local code=${1-} step=${2-}
+    if [ "$code" = 0 ] || [ -z "$step" ]; then
+        return 1
+    fi
+    printf 'boot-test: FAILED (exit %s) in step %s\n' "$code" "$step"
 }
 
 bt_dropin_verdict() {
