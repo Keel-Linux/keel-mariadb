@@ -33,6 +33,24 @@ tls:
     # web page of its own. Webmin, on 12321, carries its own certificate.
     enabled: false
 
+# The appliance manifest the image ships, /usr/share/keel/appliances/
+# mariadb.yaml (packages/keel-mariadb, handbook decision 0041), and this
+# machine's choices against it: the installation mode chosen once, and every
+# overlay of the chain written out (0027), here at the manifest's defaults
+# for a simple installation. A pair, primary and replica on the mesh with
+# the primary holding the pair's VIP, adds appliance.vip and database.server
+# in a cloud mode: docs/replication.md in the keel repository.
+appliance:
+  name: mariadb
+installation:
+  mode: simple
+overlays:
+  installer: enabled
+  wireguard: disabled
+  etcd: disabled
+  crowdsec: disabled
+  vip: disabled
+
 secrets:
   root_password:
     file: /etc/keel/secrets/root_password
@@ -41,6 +59,8 @@ secrets:
 
 app:
   options:
+    # An option the manifest declares (default admin): renders to
+    # APP_DB_USER, the account firstboot.d/35mysqlpass sets the password of.
     db_user: admin
 
 hub:

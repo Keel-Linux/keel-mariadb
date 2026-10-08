@@ -1,0 +1,34 @@
+Source: keel-mariadb
+Section: database
+Priority: optional
+Maintainer: KeelLinux maintainers <admin@keellinux.org>
+Uploaders: Marcos Mendez <mendez.foto@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Vcs-Git: https://github.com/Keel-Linux/keel-mariadb.git -b main [packages/keel-mariadb]
+Vcs-Browser: https://github.com/Keel-Linux/keel-mariadb/tree/main/packages/keel-mariadb
+
+Package: keel-mariadb
+Architecture: all
+Depends:
+ keel (>= 0.23.0),
+ keel-core (>= 0.1.3),
+ mariadb-server,
+ ${misc:Depends},
+Description: Keel MariaDB, the database layer of Keel appliances
+ The appliance manifest of Keel MariaDB (handbook decisions 0041, 0047 and
+ 0049), installed as /usr/share/keel/appliances/mariadb.yaml: Keel Core's
+ five overlays inherited with their states, and the MariaDB server as the
+ appliance's own process on 3306, a mesh port, with its Monit check, the
+ db_password secret the first boot hook sets the administrative account
+ from, and the db_user option that names that account.
+ .
+ With it a spec may say appliance.name: mariadb and declare the pair of
+ docs/replication.md, a primary and a replica on the mesh whose primary
+ holds the pair's VIP. It depends on keel-core 0.1.3, the first that
+ carries the vip overlay, on keel 0.23.0, the first that configures such a
+ pair, and on mariadb-server, whose unit the manifest names. Installing it
+ enables nothing: keel spec apply sets each overlay to the state the
+ instance spec gives it.

@@ -24,10 +24,15 @@ for tool in kcov bats python3; do
 done
 
 report="${COVERAGE_DIR:-$(mktemp -d)}"
+# Every suite but tests/package.bats, which builds the Debian package of
+# packages/keel-mariadb with dpkg-buildpackage, measures no shell, and runs
+# in the check "packages / build" (.github/workflows/packages.yml), where
+# debhelper is; the hosted runner of test-shell.yml has none.
+mapfile -t suites < <(find "$here" -maxdepth 1 -name '*.bats' ! -name package.bats | sort)
 # The include pattern is the whitelist, so no exclude pattern is needed; an
 # exclude of /tests/ would drop tests/lib/boot-test-lib.sh with it.
 kcov --include-pattern=/lib/mariadb.sh,/firstboot.d/35mysqlpass,/tests/lib/boot-test-lib.sh,/bin/keel-project-packages \
-    "$report" bats "$here"
+    "$report" bats "${suites[@]}"
 
 json="$(find "$report" -mindepth 2 -maxdepth 2 -name coverage.json -not -path "*/kcov-merged/*" | head -1)"
 echo
