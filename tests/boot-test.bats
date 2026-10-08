@@ -715,6 +715,26 @@ log_bin = mariadb-bin"
     run ! bt_repl_row_verdict "" ""
 }
 
+# run 37842190136 on keel-lxc-1: the client said "Can't connect to server
+# on '::1' (115)" and the run ended with nothing about why the server was
+# not there; the node is asked for its unit and the journals instead
+@test "db_diagnostics_argv: the unit's status and the journals of the server and the first boot, through one shell" {
+    run bt_db_diagnostics_argv mariadb.service
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = sh ]
+    [ "${lines[1]}" = -c ]
+    [ "${lines[2]}" = "systemctl status --no-pager -l mariadb.service; journalctl --no-pager -n 60 -o short-precise -u mariadb.service -u inithooks.service" ]
+    [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "db_diagnostics_argv: refuses an empty unit or one that is not a unit name" {
+    run bt_db_diagnostics_argv ""
+    [ "$status" -eq 1 ]
+    run bt_db_diagnostics_argv "mariadb.service; rm -rf /"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+}
+
 @test "db_argv: the client command for a query this test chooses" {
     output=$(bt_db_argv admin fc42::2 3306 "SELECT marker FROM t")
     [ "$output" = $'mysql\n--user=admin\n--host=fc42::2\n--port=3306\n--protocol=TCP\n--batch\n--skip-column-names\n--execute=SELECT marker FROM t' ]

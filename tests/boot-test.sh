@@ -129,6 +129,7 @@ trap 'log "interrupted"; exit 130' INT
 trap 'log "terminated"; exit 143' TERM
 
 # --- 1. the layers, pulled once for the whole run ---------------------
+step 1 "the layers, pulled from $BT_LAYERS_DIR"
 log "pulling $BT_APPLIANCE from $BT_LAYERS_DIR"
 keel pull "$BT_APPLIANCE" --source "$BT_LAYERS_DIR" --cache-dir "$BT_CACHE_DIR" --non-interactive
 
@@ -146,6 +147,7 @@ declared_password=$(cat "$secrets_dir/db_password")
 repl_password=$(cat "$secrets_dir/app_password")
 
 # --- 3. assemble, mark, describe and configure each node --------------
+step 3 "each node assembled, marked, described and configured"
 prepare_node() {
     # prepare_node INDEX NAME ROLE
     local index=$1 container=$2 role=$3 dir rootfs target
@@ -196,6 +198,7 @@ for ((i = 0; i < node_count; i++)); do
 done
 
 # --- 4. boot them all, then wait for an address each ------------------
+step 4 "every node started, each with an address"
 for container in "${names[@]}"; do
     log "starting $container on bridge $BT_BRIDGE"
     lxc start "$container" -d
@@ -211,6 +214,7 @@ for container in "${names[@]}"; do
 done
 
 # --- 5. the topology, reported and handed to every node ---------------
+step 5 "the topology reported and handed to every node"
 topology=""
 for ((i = 0; i < node_count; i++)); do
     topology+="$((i + 1)) ${names[i]} ${roles[i]} ${addrs[i]}"$'\n'
@@ -235,6 +239,7 @@ if [ -n "$BT_ROLES" ]; then
 fi
 
 # --- 6. first boot finished on every node -----------------------------
+step 6 "the first boot finished on every node"
 #
 # 98finalize has cleared RUN_FIRSTBOOT and the machine answers, on the
 # console (confconsole's usage screen) or on SSH. The answer alone is not
@@ -274,6 +279,7 @@ if [ -n "$BT_KEEL_DEB" ]; then
 fi
 
 # --- 7. what every node is, checked on every node ---------------------
+step 7 "every node checked: the declared password, the module, Webmin, keel diff"
 code=""
 webmin_answers() {
     code=$(curl -6 -k -s -o /dev/null -w '%{http_code}' \
@@ -296,8 +302,17 @@ for ((i = 0; i < node_count; i++)); do
     # loopback only, and the password reaches it in the environment so it
     # never appears in the container's process list.
     mapfile -t client < <(bt_db_client_argv "$BT_DB_USER" "$BT_DB_HOST" "$BT_DB_PORT")
-    answer=$(lxc attach "$container" --set-var "MYSQL_PWD=$declared_password" -- "${client[@]}") \
-        || { echo "boot-test: the database on $container refused the declared password" >&2; exit 1; }
+    if ! answer=$(lxc attach "$container" --set-var "MYSQL_PWD=$declared_password" -- "${client[@]}"); then
+        # A password refused and a server that never came up read the same
+        # from here, so the node is asked which it was before the run ends:
+        # the unit's status and the journal of the server and of the first
+        # boot (run 37842190136 on keel-lxc-1: "Can't connect to server on
+        # '::1' (115)" after 35mysqlpass had failed, and nothing more).
+        echo "boot-test: the database on $container did not answer the declared password" >&2
+        mapfile -t diagnostics < <(bt_db_diagnostics_argv "$BT_DB_SERVICE")
+        lxc attach "$container" -- "${diagnostics[@]}" 2>&1 || true
+        exit 1
+    fi
     bt_db_verdict "$answer"
 
     # The panel core carries, with the module this layer adds to it.

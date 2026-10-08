@@ -79,6 +79,10 @@ BT_REPL_RUNNING_ANSWER=ON
 BT_REPL_HELD_DB=operatordata
 BT_REPL_REFUSED="refused: "
 BT_APPLY_FAILED=16
+# What a node is asked when its database never answered the client at all:
+# the server's unit and the first boot's, their last lines in the journal.
+BT_DB_SERVICE=mariadb.service
+BT_DIAGNOSTIC_LINES=60
 # The marker column is VARCHAR(64), so a longer value would be truncated on
 # the way in and the comparison on the replica would fail for a reason that
 # has nothing to do with replication.
@@ -460,6 +464,23 @@ bt_db_verdict() {
     fi
     echo "boot-test: the database client answered '${1-}', not '$BT_DB_PROBE_ANSWER': the declared password did not reach the database" >&2
     return 1
+}
+
+bt_db_diagnostics_argv() {
+    # bt_db_diagnostics_argv UNIT: what to ask the container when the
+    # database client could not connect at all, one argument per line:
+    # the unit's status and the last lines of its journal and of the first
+    # boot's, so a server that never came up names its reason in the job's
+    # log (status=226/NAMESPACE under a stock LXC profile, a hook that
+    # gave up waiting) instead of the client's "Can't connect" alone
+    # (run 37842190136 on keel-lxc-1, 2026-10-08). Run through a shell
+    # inside the container, since it is two commands.
+    local unit=${1-}
+    case "$unit" in
+        ""|*[!A-Za-z0-9@._-]*) return 1 ;;
+    esac
+    printf '%s\n' sh -c \
+        "systemctl status --no-pager -l $unit; journalctl --no-pager -n $BT_DIAGNOSTIC_LINES -o short-precise -u $unit -u inithooks.service"
 }
 
 bt_db_client_argv() {
