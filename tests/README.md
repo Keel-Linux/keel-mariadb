@@ -33,7 +33,8 @@ the machine matches the description.
   `overlay/usr/lib/inithooks/lib/mariadb.sh`, the logic behind the first
   boot hook `35mysqlpass`.
 - `hook.bats`: the hook itself, run for real against scratch directories
-  with every system command stubbed.
+  with every system command stubbed, and inithooks' `lib/console.sh` a
+  stand-in that answers from `INITHOOKS_UNATTENDED`, as `run` exports it.
 - `coverage.sh`: runs the bats suite under kcov and fails when any measured
   file is below `COVERAGE_THRESHOLD` (default 95).
 - `instance.yaml`: the description the test container boots from. It

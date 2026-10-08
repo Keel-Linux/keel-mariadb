@@ -4,29 +4,29 @@ Standard: decisions 0003 (90 percent per repository, 95 for code the
 project writes) and 0004 (bats plus kcov for shell; a build and a boot on
 LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 
-## Measured 2026-09-27
+## Measured 2026-10-08
 
 | File | Test | Lines | Note |
 | --- | --- | --- | --- |
 | overlay/usr/lib/inithooks/lib/mariadb.sh | tests/mariadb.bats (13 tests) | 100 percent (43/43) under kcov | every function and every branch |
-| overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (12 tests) | 95.45 percent (21/22) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
+| overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (14 tests) | 96.00 percent (24/25) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
 | tests/lib/boot-test-lib.sh | tests/boot-test.bats (82 tests) | 100 percent (304/304) under kcov | argument parsing, address discovery, deadlines, the container marks, the database, module, Webmin and diff verdicts, the node options, and the replication phase: the section each node's description gains, the verdicts on what keel did, the refusal that must happen when the replica holds data (a refusal for another reason quoted, the primary's silence among them), the step names a failed run ends with, and what a node is asked when its database never answered |
 | bin/keel-project-packages | tests/project-packages.bats (6 tests) | 100 percent (32/32) under kcov | inithooks, confconsole and keel are installed at apt's candidate, and the candidate is the Keel archive's in the suite of the track (KEEL_APT_TRACK); a version below the candidate, another source or an unknown track fails |
 | overlay/usr/lib/inithooks/bin/dbpass.py | none | 0 | dialog wrapper, only reached with a terminal attached |
 | conf.d/main | the build | integration only | build time script, 0004 pragmatic limits |
 | tests/boot-test.sh | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the four measured shell files: **99.75 percent (400/401)**,
-122 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
+Total over the four measured shell files: **99.75 percent (403/404)**,
+124 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
 the workflow sets to 95, the lowest measured file. It is only ever raised
 (decision 0006).
 
     $ COVERAGE_THRESHOLD=95 tests/coverage.sh
     kcov line coverage (threshold 95 percent):
-     100.00  43/43  mariadb.sh
-      95.45  21/22  35mysqlpass
-     100.00  304/304  boot-test-lib.sh
      100.00  32/32  keel-project-packages
+     100.00  43/43  mariadb.sh
+      96.00  24/25  35mysqlpass
+     100.00  304/304  boot-test-lib.sh
 
 The topology of a run with several nodes is not measured here because it is
 not here: `lib/boot-test-nodes.sh` of `keel-linux/.github` holds it, at 113
@@ -38,18 +38,22 @@ the reusable workflows lend out is tested.
 The hook is executed for real against scratch directories, with PATH stubs
 for `systemctl`, `mysqladmin` and `mysql`, and stubs of
 `bin/mysqlconf.py` and `bin/dbpass.py` under a scratch `INITHOOKS_PATH`
-whose `lib` is a symlink to the real library, so kcov measures the file
-the layer ships. No test needs root, a database or a network.
+whose `lib` links the real library, so kcov measures the file the layer
+ships, and holds a stand-in for inithooks' `lib/console.sh` that answers
+from `INITHOOKS_UNATTENDED` alone (the real one is inithooks' and is
+measured there). No test needs root, a database or a network.
 
 What they are really about is the defect these two layers exposed: the
 declared password is what reaches the database, it reaches every host of
 the administrative account, the hook proves it by connecting and fails
 when the database refuses it, a `MYSQL_PASS` in the conf is not a password
-and is ignored, a headless boot with nothing declared fails with the name
-of the field to declare, the dialog is used only when there is a terminal,
-`APP_DB_USER` renames the account and a name that would need quoting is
-refused before anything runs, and the service is started and waited for
-before any password is set.
+and is ignored, a first boot nobody can answer (`INITHOOKS_UNATTENDED`,
+the rule 30rootpass and 31fqdn follow; keel-mariadb#24) with nothing
+declared asks nothing, says so with the name of the field to declare and
+finishes, whatever the hook's standard input is, the dialog is used only
+when somebody can answer the console, `APP_DB_USER` renames the account
+and a name that would need quoting is refused before anything runs, and
+the service is started and waited for before any password is set.
 
 ## The appliance gate
 

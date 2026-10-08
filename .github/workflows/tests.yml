@@ -20,7 +20,7 @@ permissions:
 jobs:
   tests:
     # tests/coverage.sh measures three shell files (COVERAGE.md): the first
-    # boot library at 100 percent, the first boot hook at 95.45 (the one
+    # boot library at 100 percent, the first boot hook at 96.00 (the one
     # uncovered line is the process substitution kcov attributes to no
     # line) and the boot test's library at 100. The threshold is the lowest
     # of them and is only ever raised (decision 0006). This job produces

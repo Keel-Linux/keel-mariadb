@@ -87,6 +87,19 @@ adds to ``CONF_VARS``, is a build time variable fab passes to the conf
 scripts inside the chroot; it never reaches the inithooks conf and nothing
 reads it there.
 
+Whether anybody can answer the password screen is inithooks' rule,
+``lib/console.sh``, the one ``30rootpass`` and ``31fqdn`` follow: ``run``
+asks once and hands the answer to every hook in ``INITHOOKS_UNATTENDED``.
+The hook used to test its own standard input for a terminal, and tty1 of
+an LXC container is a terminal nobody is attached to, so a headless first
+boot without ``DB_PASS`` waited for good at a box nobody could see
+(issue #24). Now, when nobody can answer and nothing is declared, the hook
+asks nothing, says so in one line in the inithooks log and finishes; the
+account stays as the build published it, unable to authenticate, until the
+description declares ``secrets.db_password`` or ``keel-init`` asks it at a
+console somebody is attached to. The build fails on an inithooks without
+that library.
+
 The administrative account is ``admin``, created by ``conf.d/main`` with a
 hash no input produces, so it authenticates nothing until the first boot
 sets it. A layer is published once and reused, so a password chosen at
