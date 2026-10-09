@@ -747,3 +747,117 @@ log_bin = mariadb-bin"
     run ! bt_db_argv admin fc42::2 "" "SELECT 1"
     run ! bt_db_argv admin fc42::2 threethousand "SELECT 1"
 }
+
+# the first boot of the platform, and 3306 on the uplink (#29)
+#
+# pct create of Proxmox VE removes /etc/machine-id and writes a preset, so
+# the first start of the container is systemd's first boot, which enables
+# every unit the presets do not disable: mariadb.socket among them, on
+# [::]:3306 (keel-mariadb#29). The gate does the same to each node.
+
+pve_rootfs() {
+    # pve_rootfs: a scratch rootfs with a machine id, printed on stdout
+    local rootfs="$BATS_TEST_TMPDIR/pve-$RANDOM"
+    mkdir -p "$rootfs/etc" "$rootfs/var/lib/dbus"
+    printf '0123456789abcdef0123456789abcdef\n' > "$rootfs/etc/machine-id"
+    printf '%s\n' "$rootfs"
+}
+
+@test "pve_create: removes the machine id, so the next start is systemd's first boot" {
+    rootfs=$(pve_rootfs)
+    run bt_pve_create "$rootfs"
+    [ "$status" -eq 0 ]
+    [ ! -e "$rootfs/etc/machine-id" ]
+    [[ $output == *"first boot"* ]]
+}
+
+@test "pve_create: an empty machine id is removed too, which is not a first boot" {
+    rootfs=$(pve_rootfs)
+    : > "$rootfs/etc/machine-id"
+    bt_pve_create "$rootfs"
+    [ ! -e "$rootfs/etc/machine-id" ]
+}
+
+@test "pve_create: the D-Bus copy goes, a link to the systemd one stays" {
+    rootfs=$(pve_rootfs)
+    printf 'x\n' > "$rootfs/var/lib/dbus/machine-id"
+    bt_pve_create "$rootfs"
+    [ ! -e "$rootfs/var/lib/dbus/machine-id" ]
+    rootfs=$(pve_rootfs)
+    ln -s /etc/machine-id "$rootfs/var/lib/dbus/machine-id"
+    bt_pve_create "$rootfs"
+    [ -L "$rootfs/var/lib/dbus/machine-id" ]
+}
+
+@test "pve_create: writes the preset Proxmox VE writes at create time" {
+    rootfs=$(pve_rootfs)
+    bt_pve_create "$rootfs"
+    [ "$(cat "$rootfs/etc/systemd/system-preset/00-pve.preset")" = "# Added by PVE at create-time for first-boot configuration.
+enable container-getty@.service
+disable getty@.service
+disable sys-kernel-config.mount
+disable sys-kernel-debug.mount
+disable systemd-networkd.service" ]
+}
+
+@test "pve_create: a rootfs with no etc fails loudly" {
+    run bt_pve_create "$BATS_TEST_TMPDIR/nothing"
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a rootfs"* ]]
+}
+
+# ss -Hltn as iproute2 6 prints it on trixie
+SS_SOCKET='LISTEN 0      4096                                          *:3306             *:*'
+SS_PAIR='LISTEN 0      80                                        [::1]:3306          [::]:*
+LISTEN 0      80                     [fd11:a58a:88ef::ffff:1]:3306          [::]:*
+LISTEN 0      80         [fd11:a58a:88ef:0:382f:45b:553c:f11]:3306          [::]:*'
+
+@test "wildcard_listeners: *, [::] and 0.0.0.0 on the port, with or without a device" {
+    output=$(printf '%s\n' "$SS_SOCKET" | bt_wildcard_listeners 3306)
+    [ "$output" = "*:3306" ]
+    output=$(printf 'LISTEN 0 80 [::]:3306 [::]:*\nLISTEN 0 80 0.0.0.0:3306 0.0.0.0:*\nLISTEN 0 80 *%%eth0:3306 *:*\n' \
+        | bt_wildcard_listeners 3306)
+    [ "$output" = $'[::]:3306\n0.0.0.0:3306\n*%eth0:3306' ]
+}
+
+@test "wildcard_listeners: loopback, an address, another port and other text are not" {
+    output=$(printf '%s\n' "$SS_PAIR" | bt_wildcard_listeners 3306)
+    [ -z "$output" ]
+    output=$(printf 'LISTEN 0 80 *:33060 *:*\nLISTEN 0 80 [::]:13306 [::]:*\nnothing\n\n' | bt_wildcard_listeners 3306)
+    [ -z "$output" ]
+}
+
+@test "wildcard_listeners: refuses a port that is not a number" {
+    run bt_wildcard_listeners ""
+    [ "$status" -eq 1 ]
+    run bt_wildcard_listeners 33x6
+    [ "$status" -eq 1 ]
+}
+
+@test "uplink_verdict: no wildcard and nothing answering on the uplink pass" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_PAIR" 1
+    [ "$status" -eq 0 ]
+    [[ $output == *"node-1: 3306 is not on the uplink [fc42::2]"* ]]
+}
+
+@test "uplink_verdict: a wildcard listener fails and is quoted" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_SOCKET" 1
+    [ "$status" -eq 1 ]
+    [[ $output == *"node-1: 3306 listens on a wildcard address (*:3306)"* ]]
+    [[ $output == *"keel-mariadb#29"* ]]
+}
+
+@test "uplink_verdict: an answer on the uplink fails, also with no wildcard seen" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_PAIR" 0
+    [ "$status" -eq 1 ]
+    [[ $output == *"node-1: [fc42::2]:3306 answers from the host"* ]]
+}
+
+@test "uplink_verdict: refuses a port or a probe result that is not a number" {
+    run bt_uplink_verdict node-1 fc42::2 port "" 1
+    [ "$status" -eq 2 ]
+    run bt_uplink_verdict node-1 fc42::2 3306 "" ""
+    [ "$status" -eq 2 ]
+    run bt_uplink_verdict node-1 "" 3306 "" 1
+    [ "$status" -eq 2 ]
+}

@@ -58,10 +58,64 @@ print(eval(sys.argv[2]))' "$PACKAGE_DIR/manifest.yaml" "$1"
     [[ "$output" == "-rw-r--r-- root/root "* ]]
 }
 
-@test "it installs the manifest and its documentation, nothing more" {
+@test "it installs the manifest, the preset and its documentation, nothing more" {
     run bash -c "dpkg-deb -c '$DEB' | awk '{print \$6}' | grep -v '/\$' | sort"
     [ "$status" -eq 0 ]
-    [ "$output" = $'./usr/share/doc/keel-mariadb/changelog.gz\n./usr/share/doc/keel-mariadb/copyright\n./usr/share/keel/appliances/mariadb.yaml' ]
+    [ "$output" = $'./usr/lib/systemd/system-preset/20-keel-mariadb.preset\n./usr/share/doc/keel-mariadb/changelog.gz\n./usr/share/doc/keel-mariadb/copyright\n./usr/share/keel/appliances/mariadb.yaml' ]
+}
+
+# the socket units of mariadb-server (#29): Debian ships mariadb.socket with
+# ListenStream=3306, which is [::]:3306, and enables nothing. systemd's
+# first boot, which pct create of Proxmox VE causes, enables every unit no
+# preset disables; the socket then holds 3306 on every address and the
+# server's bind-address has no effect.
+@test "the preset disables both socket units of the server, and nothing else" {
+    dpkg-deb -x "$DEB" "$BUILD/root"
+    run grep -v -e '^#' -e '^$' "$BUILD/root/usr/lib/systemd/system-preset/20-keel-mariadb.preset"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'disable mariadb.socket\ndisable mariadb-extra.socket' ]
+}
+
+@test "the preset is a plain file of mode 0644, owned by root" {
+    run bash -c "dpkg-deb -c '$DEB' | grep ' ./usr/lib/systemd/system-preset/20-keel-mariadb.preset$'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "-rw-r--r-- root/root "* ]]
+}
+
+# maintainer SCRIPT ARGS...: runs the package's maintainer script with
+# deb-systemd-helper a stub that records its arguments in $BUILD/dsh.calls
+maintainer() {
+    local script=$1
+    shift
+    mkdir -p "$BUILD/control" "$BUILD/stubs"
+    dpkg-deb -e "$DEB" "$BUILD/control"
+    printf '#!/bin/sh\necho "$*" >> "%s/dsh.calls"\n' "$BUILD" > "$BUILD/stubs/deb-systemd-helper"
+    chmod +x "$BUILD/stubs/deb-systemd-helper"
+    rm -f "$BUILD/dsh.calls"
+    PATH="$BUILD/stubs:$PATH" sh -e "$BUILD/control/$script" "$@"
+}
+
+# a preset is read at a first boot only: a machine already made from an
+# image, or an image whose first boot already ran, is masked by the package
+@test "postinst masks both socket units on configure" {
+    run maintainer postinst configure 0.1.0
+    [ "$status" -eq 0 ]
+    [ "$(cat "$BUILD/dsh.calls")" = "mask mariadb.socket mariadb-extra.socket" ]
+}
+
+@test "postinst does nothing on abort-upgrade and friends" {
+    run maintainer postinst abort-upgrade 0.1.1
+    [ "$status" -eq 0 ]
+    [ ! -e "$BUILD/dsh.calls" ]
+}
+
+@test "postrm unmasks them on purge only, and only what it masked" {
+    run maintainer postrm purge
+    [ "$status" -eq 0 ]
+    [ "$(cat "$BUILD/dsh.calls")" = "unmask mariadb.socket mariadb-extra.socket" ]
+    run maintainer postrm remove
+    [ "$status" -eq 0 ]
+    [ ! -e "$BUILD/dsh.calls" ]
 }
 
 # the manifest
