@@ -1,0 +1,25 @@
+#!/bin/sh
+# Mask the socket units of mariadb-server (keel-mariadb#29). The preset
+# 20-keel-mariadb.preset keeps a first boot from enabling them; this covers
+# a machine whose first boot already ran. A socket that is active now stays
+# active until it is stopped or the machine starts again: the server is not
+# restarted here, because a restart of a database is the operator's
+# decision. deb-systemd-helper records the mask, so postrm removes it on
+# purge only when this package made it.
+set -e
+
+case "$1" in
+    configure)
+        deb-systemd-helper mask mariadb.socket mariadb-extra.socket
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

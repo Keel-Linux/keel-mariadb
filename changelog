@@ -1,3 +1,31 @@
+turnkey-mariadb-19.0 (8) turnkey; urgency=high
+
+  * Security: 3306 is no longer on the uplink (#29). Debian's
+    mariadb.socket has ListenStream=3306, which systemd binds as
+    [::]:3306. pct create of Proxmox VE removes /etc/machine-id, so the
+    first start of a container is the first boot of systemd, which enables
+    every unit that no preset disables. On the nodes of the pair test
+    (keel 0.23.3, 2026-10-08, finding B3) the socket held 3306 on every
+    address, the server got its listeners from systemd, bind-address had
+    no effect, and 3306 answered on the public uplink. The manifest says
+    expose: mesh, never on the uplink.
+  * conf.d/main disables and masks mariadb.socket and mariadb-extra.socket
+    in the image, and stops the build when a socket unit of the tree can
+    listen on a wildcard address for 3306 and is not masked
+    (bin/keel-socket-wildcard, copied into the tree like
+    bin/keel-project-packages and removed with it).
+  * keel-mariadb 0.1.1 ships a preset that disables both units at a first
+    boot, and its postinst masks both, for a machine whose first boot
+    already ran. It does not restart the server.
+  * The boot test makes each node as pct create does (no machine id, the
+    00-pve.preset) and, after the first boot, checks that nothing listens
+    on a wildcard address for 3306 and that the node address does not
+    answer on 3306 from the host. The appliance job moves to packages.yml
+    and installs the keel-mariadb package built from the branch before the
+    first boot; the check keeps its name.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 09 Oct 2026 01:00:00 +0000
+
 turnkey-mariadb-19.0 (7) turnkey; urgency=medium
 
   * The image ships the appliance manifest of Keel MariaDB,

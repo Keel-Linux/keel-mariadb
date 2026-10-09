@@ -35,10 +35,13 @@ include $(FAB_PATH)/common/mk/turnkey.mk
 # packages, that each is installed at apt's candidate and that the candidate
 # is the Keel archive's, in the suite of the track. The check runs inside the
 # tree while its apt lists are still there, so it is copied in before the
-# conf scripts run and conf.d/main removes it again.
+# conf scripts run and conf.d/main removes it again. bin/keel-socket-wildcard
+# goes in the same way: conf.d/main runs it on the tree, so that no socket
+# unit can listen on a wildcard address for 3306 (#29).
 KEEL_BUILD_TOOLS ?= /usr/local/lib/keel-build
 define _keel_root.patched/pre
 
 	install -D -m 755 $(CURDIR)/bin/keel-project-packages $O/root.patched$(KEEL_BUILD_TOOLS)/keel-project-packages;
+	install -D -m 755 $(CURDIR)/bin/keel-socket-wildcard $O/root.patched$(KEEL_BUILD_TOOLS)/keel-socket-wildcard;
 endef
 root.patched/pre += $(_keel_root.patched/pre)

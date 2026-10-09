@@ -2,9 +2,10 @@
 # Line coverage of the shell this layer writes, measured with kcov over the
 # bats suite (decision 0004). The measured files are the first boot library
 # (lib/mariadb.sh), the first boot hook itself (firstboot.d/35mysqlpass), the
-# logic of the boot test (tests/lib/boot-test-lib.sh) and the check of the
-# project packages the recipe runs (bin/keel-project-packages); the 95 percent
-# bar of decision 0003 applies to all four. Exits 1 below the threshold, 2
+# logic of the boot test (tests/lib/boot-test-lib.sh) and the two checks the
+# recipe runs on the built tree (bin/keel-project-packages and
+# bin/keel-socket-wildcard); the 95 percent bar of decision 0003 applies to
+# all five. Exits 1 below the threshold, 2
 # when a tool is missing. tests/boot-test.sh is the thin main that runs keel
 # and LXC as root and is exercised by the container run in
 # test-appliance.yml, not measured here; conf.d/main is a build time script
@@ -31,7 +32,7 @@ report="${COVERAGE_DIR:-$(mktemp -d)}"
 mapfile -t suites < <(find "$here" -maxdepth 1 -name '*.bats' ! -name package.bats | sort)
 # The include pattern is the whitelist, so no exclude pattern is needed; an
 # exclude of /tests/ would drop tests/lib/boot-test-lib.sh with it.
-kcov --include-pattern=/lib/mariadb.sh,/firstboot.d/35mysqlpass,/tests/lib/boot-test-lib.sh,/bin/keel-project-packages \
+kcov --include-pattern=/lib/mariadb.sh,/firstboot.d/35mysqlpass,/tests/lib/boot-test-lib.sh,/bin/keel-project-packages,/bin/keel-socket-wildcard \
     "$report" bats "${suites[@]}"
 
 json="$(find "$report" -mindepth 2 -maxdepth 2 -name coverage.json -not -path "*/kcov-merged/*" | head -1)"

@@ -1,7 +1,8 @@
 #!/usr/bin/make -f
 # The appliance manifest sits beside debian/ (docs/manifest-v1.md in the
 # handbook, "Kinds, and where each file lives") and is installed under the
-# name keel looks it up by, as keel-core and keel-web do.
+# name keel looks it up by, as keel-core and keel-web do. The preset keeps
+# the socket units of mariadb-server off at a first boot (keel-mariadb#29).
 
 %:
 	dh $@
@@ -9,3 +10,5 @@
 execute_after_dh_auto_install:
 	install -D -m 0644 manifest.yaml \
 		debian/keel-mariadb/usr/share/keel/appliances/mariadb.yaml
+	install -D -m 0644 keel-mariadb.preset \
+		debian/keel-mariadb/usr/lib/systemd/system-preset/20-keel-mariadb.preset

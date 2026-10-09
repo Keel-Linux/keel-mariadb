@@ -83,6 +83,18 @@ remote clients opens the port, says who may connect and terminates TLS.
 That is a decision an appliance makes, not one a database layer makes for
 every appliance built on it.
 
+The socket units of ``mariadb-server`` are masked in the image, and the
+``keel-mariadb`` package disables them in a preset and masks them too
+(issue #29). Debian's ``mariadb.socket`` listens on ``[::]:3306``, and with
+it active the server gets its listeners from systemd, so ``bind-address``
+has no effect. ``pct create`` of Proxmox VE makes the first start of a
+container the first boot of systemd, which enables every unit that no
+preset disables: before this fix, 3306 answered on the public uplink of
+such nodes. ``conf.d/main`` stops the build when a socket unit of the tree
+can listen on a wildcard address for 3306 (``bin/keel-socket-wildcard``),
+and the boot test makes each node as ``pct create`` does and checks that
+3306 is not on its uplink.
+
 If the maintainer later wants literal parity with the upstream ``mysql``
 appliance, that is a different artefact: the appliance, built on this
 layer, with Adminer and a web server of its own.

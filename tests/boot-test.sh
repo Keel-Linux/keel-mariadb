@@ -328,6 +328,10 @@ for ((i = 0; i < node_count; i++)); do
     # mesh). After the first boot the server listens on loopback alone:
     # nothing holds 3306 on a wildcard address, and the node's address on
     # the bridge, its uplink here, does not answer from the host (#29).
+    # The record of the first boot of systemd (bt_pve_create) and the state
+    # of the two socket units, for the log; the verdict is the next lines.
+    lxc attach "$container" -- sh -c \
+        "journalctl -b -o short-precise --no-pager | grep -E 'first boot|preset unit settings'; systemctl is-enabled mariadb.socket mariadb-extra.socket" || true
     listeners=$(lxc attach "$container" -- ss -Hltn "sport = :$BT_DB_PORT")
     printf '%s\n' "$listeners"
     uplink_probe=0

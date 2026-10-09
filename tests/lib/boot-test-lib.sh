@@ -381,6 +381,79 @@ StandardError=journal
 DROPIN
 }
 
+# What pct create of Proxmox VE writes into a new container
+# (PVE::LXC::Setup::Base, setup_systemd_preset), read off CT 9003 on
+# 2026-10-09. Kept as Proxmox VE writes it, comment line included.
+BT_PVE_PRESET="etc/systemd/system-preset/00-pve.preset"
+BT_PVE_PRESET_TEXT="# Added by PVE at create-time for first-boot configuration.
+enable container-getty@.service
+disable getty@.service
+disable sys-kernel-config.mount
+disable sys-kernel-debug.mount
+disable systemd-networkd.service"
+
+bt_pve_create() {
+    # bt_pve_create ROOTFS: do to the tree what pct create of Proxmox VE
+    # does to a new container (clear_machine_id, not a clone): remove
+    # /etc/machine-id, and /var/lib/dbus/machine-id unless it is a link,
+    # and write the preset. With no machine id the first start is the
+    # first boot of systemd, which enables every unit that no preset
+    # disables (machine-id(5), "First Boot Semantics"). That is how
+    # mariadb.socket came to listen on [::]:3306 on the real nodes (#29),
+    # and a tree that keeps its machine id never shows it.
+    local rootfs=${1-} dbus
+    if [ ! -d "$rootfs/etc" ]; then
+        echo "boot-test: $rootfs is not a rootfs (no etc)" >&2
+        return 1
+    fi
+    rm -f "$rootfs/etc/machine-id" || return 1
+    dbus=$rootfs/var/lib/dbus/machine-id
+    if [ -e "$dbus" ] && [ ! -L "$dbus" ]; then
+        rm -f "$dbus" || return 1
+    fi
+    install -D -m 0644 /dev/stdin "$rootfs/$BT_PVE_PRESET" <<< "$BT_PVE_PRESET_TEXT" || return 1
+    echo "boot-test: $rootfs made as pct create makes it: no machine id, so its first start is the first boot of systemd"
+}
+
+# The local address is the fourth field of `ss -Hltn`; one line, so that
+# it is a line that runs.
+BT_WILDCARD_PROGRAM='NF >= 4 && $4 ~ ("^([*]|[[]::[]]|0[.]0[.]0[.]0)(%[^:]+)?:" port "$") { print $4 }'
+
+bt_wildcard_listeners() {
+    # bt_wildcard_listeners PORT: of the `ss -Hltn` lines on standard
+    # input, the local addresses that listen on PORT on every address of
+    # the machine: *, [::] or 0.0.0.0, with or without a device (%eth0).
+    # One per line; nothing when there is none.
+    local port=${1-}
+    case "$port" in ''|*[!0-9]*) return 1 ;; esac
+    awk -v port="$port" "$BT_WILDCARD_PROGRAM"
+}
+
+bt_uplink_verdict() {
+    # bt_uplink_verdict NAME ADDRESS PORT LISTENERS PROBE: 3306 is a mesh
+    # port, never on the uplink (the manifest of this appliance, expose:
+    # mesh). LISTENERS is what `ss -Hltn` printed in the node for PORT,
+    # PROBE the exit code of a TCP connection from the host to
+    # [ADDRESS]:PORT, the node's address on the bridge, which is its
+    # uplink here. A wildcard listener fails even when the probe does not
+    # connect, since a firewall can hide it; a probe that connects fails
+    # even with no wildcard seen. Exit 2 when an argument is not usable.
+    local name=${1-} address=${2-} port=${3-} listeners=${4-} probe=${5-} wildcards
+    case "$port" in ''|*[!0-9]*) return 2 ;; esac
+    case "$probe" in ''|*[!0-9]*) return 2 ;; esac
+    [ -n "$name" ] && [ -n "$address" ] || return 2
+    wildcards=$(printf '%s\n' "$listeners" | bt_wildcard_listeners "$port" | paste -sd ' ' -)
+    if [ -n "$wildcards" ]; then
+        echo "boot-test: $name: $port listens on a wildcard address ($wildcards), so it is on the uplink too (keel-mariadb#29)" >&2
+        return 1
+    fi
+    if [ "$probe" -eq 0 ]; then
+        echo "boot-test: $name: [$address]:$port answers from the host, on the uplink (keel-mariadb#29)" >&2
+        return 1
+    fi
+    echo "boot-test: $name: $port is not on the uplink [$address]: no wildcard listener, and no answer from the host"
+}
+
 bt_spec_targets() {
     # bt_spec_targets ROOTFS: the paths the spec is installed at.
     local relative
