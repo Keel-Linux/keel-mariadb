@@ -32,3 +32,8 @@ Description: Keel MariaDB, the database layer of Keel appliances
  pair, and on mariadb-server, whose unit the manifest names. Installing it
  enables nothing: keel spec apply sets each overlay to the state the
  instance spec gives it.
+ .
+ It keeps the socket units of mariadb-server off: a preset disables
+ mariadb.socket and mariadb-extra.socket for the first boot of systemd,
+ and postinst masks both. mariadb.socket listens on [::]:3306, and with it
+ the server's bind-address has no effect, so 3306 was on the uplink.

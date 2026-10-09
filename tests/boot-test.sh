@@ -165,6 +165,12 @@ prepare_node() {
     # a drop-in, without which a hook that prints more than the terminal
     # buffer holds blocks writing to a tty1 nobody reads.
     bt_mark_container "$rootfs"
+    # What pct create of Proxmox VE does to a new container, the platform
+    # the appliance runs on: no machine id and its preset, so the first
+    # start is systemd's first boot and enables what the presets do not
+    # disable. Without it the gate booted a tree the platform never makes,
+    # and mariadb.socket on [::]:3306 was never seen here (#29).
+    bt_pve_create "$rootfs"
     install -d -m 0700 "$rootfs/etc/keel/secrets"
     for target in $(bt_secret_targets "$rootfs"); do
         install -m 0600 "$secrets_dir/$(basename "$target")" "$target"
@@ -279,8 +285,11 @@ if [ -n "$BT_KEEL_DEB" ]; then
 fi
 
 # --- 7. what every node is, checked on every node ---------------------
-step 7 "every node checked: the declared password, the module, Webmin, keel diff"
+step 7 "every node checked: the declared password, 3306 off the uplink, the module, Webmin, keel diff"
 code=""
+db_port_answers() {
+    timeout 5 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$1" "$BT_DB_PORT" 2>/dev/null
+}
 webmin_answers() {
     code=$(curl -6 -k -s -o /dev/null -w '%{http_code}' \
         "https://[$1]:$BT_WEBMIN_PORT/" || true)
@@ -314,6 +323,20 @@ for ((i = 0; i < node_count; i++)); do
         exit 1
     fi
     bt_db_verdict "$answer"
+
+    # 3306 is a mesh port and never on the uplink (the manifest, expose:
+    # mesh). After the first boot the server listens on loopback alone:
+    # nothing holds 3306 on a wildcard address, and the node's address on
+    # the bridge, its uplink here, does not answer from the host (#29).
+    # The record of the first boot of systemd (bt_pve_create) and the state
+    # of the two socket units, for the log; the verdict is the next lines.
+    lxc attach "$container" -- sh -c \
+        "journalctl -b -o short-precise --no-pager | grep -E 'first boot|preset unit settings'; systemctl is-enabled mariadb.socket mariadb-extra.socket" || true
+    listeners=$(lxc attach "$container" -- ss -Hltn "sport = :$BT_DB_PORT")
+    printf '%s\n' "$listeners"
+    uplink_probe=0
+    db_port_answers "$addr" || uplink_probe=$?
+    bt_uplink_verdict "$container" "$addr" "$BT_DB_PORT" "$listeners" "$uplink_probe"
 
     # The panel core carries, with the module this layer adds to it.
     status=$(lxc attach "$container" -- dpkg-query -W -f '${Status}' "$BT_WEBMIN_MODULE" 2>/dev/null || true)

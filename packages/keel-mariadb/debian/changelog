@@ -1,3 +1,22 @@
+keel-mariadb (0.1.1) trixie; urgency=high
+
+  * Keep the socket units of mariadb-server off (keel-mariadb#29). Debian's
+    mariadb.socket has ListenStream=3306, which systemd binds as [::]:3306.
+    The first boot of systemd enables every unit that no preset disables,
+    and pct create of Proxmox VE makes the first start of a container a
+    first boot. On such nodes the socket held 3306 on every address, the
+    server got its listeners from systemd, bind-address had no effect, and
+    3306 answered on the public uplink. The manifest says expose: mesh.
+  * Ship /usr/lib/systemd/system-preset/20-keel-mariadb.preset, which
+    disables mariadb.socket and mariadb-extra.socket at a first boot.
+  * postinst masks both units with deb-systemd-helper on configure, for a
+    machine whose first boot already ran. It does not stop an active socket
+    or restart the server; that occurs at the next start of the machine, or
+    when the operator restarts the server. postrm removes the masks it made,
+    on purge only.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 09 Oct 2026 01:00:00 +0000
+
 keel-mariadb (0.1.0) trixie; urgency=medium
 
   * First release (handbook decision 0041; keel-mariadb#25). Ships the

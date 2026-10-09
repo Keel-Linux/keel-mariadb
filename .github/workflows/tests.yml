@@ -2,9 +2,8 @@
 #   tests:     the first boot library, the first boot hook and the boot
 #              test's library under bats and kcov, on hosted runners, with
 #              the threshold committed here
-#   appliance: fetch the published layer, verify it, assemble it, boot it
-#              in LXC and run tests/boot-test.sh against it, on the
-#              self-hosted runner
+#   appliance: in .github/workflows/packages.yml, beside the build of the
+#              keel-mariadb package it installs before the first boot
 #   package:   a change that the layer ships needs a changelog entry, so it
 #              can reach a machine
 name: tests
@@ -30,41 +29,6 @@ jobs:
     uses: keel-linux/.github/.github/workflows/test-shell.yml@main
     with:
       threshold: 95
-  appliance:
-    # The boot test (org-plan section 1): the mariadb layer is fetched from
-    # https://mirror.keellinux.org/layers, verified, assembled into a
-    # scratch rootfs, booted in LXC and checked by tests/boot-test.sh.
-    # Nothing is built there; the build host publishes the layer
-    # (docs/releases-host.md of the keel repository). So what boots is the
-    # layer the mirror publishes, never this branch: a pull request that
-    # changes the recipe is not exercised by this check, which is why the
-    # reusable job is called boot-published-layer.
-    #
-    # test-appliance.yml targets the labels "self-hosted, keel-lxc"; a job
-    # aimed at a label no runner carries stays queued until GitHub cancels
-    # it after 24 hours, so the reusable workflow's contract is that
-    # callers gate on the organization variable KEEL_LXC_RUNNER
-    # (docs/ci-cd.md section 5 of the keel repository). A layer that has
-    # never been published fails this job instead of passing it; the
-    # bootstrap exemption for a repository whose first layer does not exist
-    # yet is allow_unpublished, and this layer is published, so it is not
-    # used here. This job produces the check
-    # "appliance / boot-published-layer".
-    if: vars.KEEL_LXC_RUNNER == 'true'
-    uses: keel-linux/.github/.github/workflows/test-appliance.yml@main
-    with:
-      appliance: mariadb
-      # A layer on core; the workflow checks this against the parent the
-      # published manifest records.
-      parent: core
-      # Two containers on one bridge, one per role, so the boot test can
-      # prove replication and not only that a single machine comes up.
-      # Handbook decision 0013 makes a test like this the condition for
-      # building the console's replication modes at all. The count is the
-      # number of names, so Galera's three later is another name here and
-      # nothing in the workflow or the test assumes two.
-      roles: primary replica
-      timeout: 60
   package:
     # Only on a pull request. require-changelog compares the two commits of
     # the pull request, which it reads from

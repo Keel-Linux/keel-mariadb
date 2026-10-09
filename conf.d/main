@@ -52,6 +52,28 @@ service mysql stop
 # The bind addresses of the overlay are what the server must come up with.
 grep -qx 'bind-address = ::1,127.0.0.1' /etc/mysql/mariadb.conf.d/99-keel-bind.cnf
 
+# The socket units of mariadb-server are disabled and masked (#29).
+# mariadb.socket has ListenStream=3306, which systemd binds as [::]:3306, on
+# every address of the machine. With the socket active the server gets its
+# listeners from systemd and the bind-address above has no effect. Debian's
+# package enables neither unit, but the first boot of systemd enables every
+# unit that no preset disables, and pct create of Proxmox VE makes the first
+# start of a container a first boot: on the real nodes 3306 answered on the
+# public uplink. Only a mask stops that. mariadb-extra.socket also starts
+# the server with sockets from systemd, so it goes too. The keel-mariadb
+# package (0.1.1 and later) ships a preset and masks both as well; the image
+# does not depend on the version of it the archive has.
+for unit in mariadb.socket mariadb-extra.socket; do
+    rm -f "/etc/systemd/system/sockets.target.wants/$unit"
+    systemctl mask "$unit"
+    [ "$(systemctl is-enabled "$unit" || true)" = masked ]
+done
+
+# No socket unit of the tree can listen on a wildcard address for 3306, the
+# two above or any other. bin/keel-socket-wildcard was copied into the tree
+# for this (Makefile, root.patched/pre) and leaves with it.
+/usr/local/lib/keel-build/keel-socket-wildcard / 3306
+
 # webmin-mysql is what puts the database in the panel core already carries;
 # the plan asks for it, so fail the build rather than ship a panel without
 # its database module (the boot test checks the running appliance too).

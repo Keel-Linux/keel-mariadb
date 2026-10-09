@@ -1,0 +1,16 @@
+# keel-mariadb: the socket units of mariadb-server stay off (keel-mariadb#29).
+#
+# mariadb.socket has ListenStream=3306, which systemd binds as [::]:3306, on
+# every address of the machine, uplink included. With the socket active the
+# server gets its listeners from systemd, and bind-address, which keel and
+# this layer use to keep 3306 on loopback and on the mesh, has no effect.
+# mariadb-extra.socket also starts mariadb.service and gives it sockets, so
+# it stays off too: the server then opens all its listeners from its own
+# configuration.
+#
+# Debian's package enables neither, but the first boot of systemd enables
+# every unit that no preset disables, and pct create of Proxmox VE makes the
+# first start of a container a first boot. The package also masks both
+# (postinst), because a preset is read at a first boot only.
+disable mariadb.socket
+disable mariadb-extra.socket

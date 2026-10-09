@@ -12,9 +12,15 @@ the machine matches the description.
   `keel-linux/.github`) runs it on the self-hosted LXC runner after pulling
   the layers from `https://mirror.keellinux.org/layers` and checking them
   with `keel verify`. It is the thin main: assemble, mark the tree as a
-  container, install the description, the secrets and the conf, start the
-  container, wait, connect to the database, check Webmin, `keel diff`. It
-  builds nothing, so it needs no fab, deck or buildtasks.
+  container, do to the tree what `pct create` of Proxmox VE does (no
+  machine id, its preset, so the first start is the first boot of
+  systemd), install the description, the secrets and the conf, start the
+  container, wait, connect to the database, check that 3306 is not on the
+  uplink (no wildcard listener, no answer from the host; #29), check
+  Webmin, `keel diff`. It builds nothing, so it needs no fab, deck or
+  buildtasks. The workflow installs the keel-mariadb package built from
+  the branch before the first boot (`package_artifact`), so the job is in
+  `packages.yml`, beside that build.
 - `lib/boot-test-lib.sh`: the logic (argument parsing, address discovery
   from `lxc-info`, waiting with a deadline, the secret files, the client
   call, the database, module and Webmin verdicts, the diff verdict, and the
@@ -35,8 +41,12 @@ the machine matches the description.
 - `hook.bats`: the hook itself, run for real against scratch directories
   with every system command stubbed, and inithooks' `lib/console.sh` a
   stand-in that answers from `INITHOOKS_UNATTENDED`, as `run` exports it.
+- `socket-wildcard.bats`: `bin/keel-socket-wildcard`, the build check of
+  `conf.d/main`, against scratch trees: a socket unit that can listen on a
+  wildcard address for 3306 and is not masked fails the build (#29).
 - `package.bats`: builds `packages/keel-mariadb` with `dpkg-buildpackage`
-  and reads back its fields, its files and the manifest. Needs `dpkg-dev`,
+  and reads back its fields, its files, the manifest and the preset, and
+  runs its maintainer scripts with `deb-systemd-helper` stubbed. Needs `dpkg-dev`,
   `debhelper` and `python3-yaml` besides `bats`; it runs in the check
   `packages / build` (`.github/workflows/packages.yml`), with lintian over
   the source and binary package, and not under `coverage.sh`.
@@ -54,6 +64,7 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     bats tests/hook.bats
     bats tests/boot-test.bats
     bats tests/dbpass.bats
+    bats tests/socket-wildcard.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
 `COVERAGE_DIR=coverage tests/coverage.sh` keeps the kcov reports.
