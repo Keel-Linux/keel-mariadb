@@ -66,7 +66,10 @@ grep -qx 'bind-address = ::1,127.0.0.1' /etc/mysql/mariadb.conf.d/99-keel-bind.c
 for unit in mariadb.socket mariadb-extra.socket; do
     rm -f "/etc/systemd/system/sockets.target.wants/$unit"
     systemctl mask "$unit"
-    [ "$(systemctl is-enabled "$unit" || true)" = masked ]
+    # The mask is the link to /dev/null that systemctl mask writes. It is
+    # read from the tree: the systemctl of the build chroot (common's
+    # systemd-chroot wrapper) has no is-enabled, and the build failed on it.
+    [ "$(readlink "/etc/systemd/system/$unit")" = /dev/null ]
 done
 
 # No socket unit of the tree can listen on a wildcard address for 3306, the
