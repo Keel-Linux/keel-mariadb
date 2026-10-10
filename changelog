@@ -1,3 +1,13 @@
+turnkey-mariadb-19.0 (9) turnkey; urgency=high
+
+  * The build checks the mask of mariadb.socket and mariadb-extra.socket
+    with the link that systemctl mask writes (/etc/systemd/system/<unit>
+    to /dev/null). The systemctl of the build chroot has no is-enabled,
+    so the layer build of 19.0-8 stopped there (step 12, 2026-10-10).
+    19.0-8 was not released; this release has its content and this fix.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Sat, 10 Oct 2026 17:24:15 +0000
+
 turnkey-mariadb-19.0 (8) turnkey; urgency=high
 
   * Security: 3306 is no longer on the uplink (#29). Debian's
