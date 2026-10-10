@@ -1,3 +1,12 @@
+turnkey-mariadb-19.0 (10) turnkey; urgency=low
+
+  * packages/keel-mariadb/debian/rules is executable in git (mode 755).
+    dpkg-buildpackage sets that mode, so with mode 644 in git the build
+    clone had a local change and the next build-package run stopped with
+    exit 4. No content change.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Sat, 10 Oct 2026 18:45:12 +0000
+
 turnkey-mariadb-19.0 (9) turnkey; urgency=high
 
   * The build checks the mask of mariadb.socket and mariadb-extra.socket
