@@ -1,3 +1,9 @@
+keel-mariadb (0.1.2) trixie; urgency=medium
+
+  * debian/rules is executable in git; no content change.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Sat, 10 Oct 2026 17:08:28 +0000
+
 keel-mariadb (0.1.1) trixie; urgency=high
 
   * Keep the socket units of mariadb-server off (keel-mariadb#29). Debian's
