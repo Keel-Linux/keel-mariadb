@@ -571,10 +571,54 @@ DEF
     [[ $output == *"it must refuse"* ]]
 }
 
-@test "refusal_verdict: a refusal about something else is not this one" {
+@test "refusal_verdict: a refusal about something else is not this one, and is quoted" {
     run bt_refusal_verdict 16 "x: refused: no machine-id"
     [ "$status" -eq 1 ]
-    [[ $output == *"said nothing about operatordata"* ]]
+    [[ $output == *"said nothing about operatordata; it refused for another reason: no machine-id"* ]]
+}
+
+# run 37838543320: the replica applied before the primary had converged
+# was refused for the primary's silence, which proves nothing about data
+@test "refusal_verdict: the primary's silence is quoted as the reason, not mistaken for the data refusal" {
+    run bt_refusal_verdict 16 "apply --system-only: 0 change(s), 1 failed
+database.server.replication.primary: refused: the primary [fc42::1]:3306 did not answer as 'repl' (ERROR 2002). The replica cannot be seeded, so nothing was dropped"
+    [ "$status" -eq 1 ]
+    [[ $output == *"said nothing about operatordata; it refused for another reason: the primary [fc42::1]:3306 did not answer as 'repl'"* ]]
+}
+
+@test "refusal_verdict: exit 16 with no refusal line at all says so" {
+    run bt_refusal_verdict 16 "apply --system-only: 0 change(s), 1 failed"
+    [ "$status" -eq 1 ]
+    [[ $output == *"said nothing about operatordata, and gave no refusal at all"* ]]
+}
+
+# the step the run is in, for the failure line the teardown adds
+
+@test "step: records the step the run is in, name and text" {
+    bt_step 8b "the primary converges first"
+    [ "$BT_STEP" = "8b, the primary converges first" ]
+    bt_step 8d "the refusal"
+    [ "$BT_STEP" = "8d, the refusal" ]
+}
+
+@test "step: refuses a step with no name or no text" {
+    run bt_step "" "text"
+    [ "$status" -eq 1 ]
+    [[ $output == *"a step needs a name and a text"* ]]
+    run bt_step 8b ""
+    [ "$status" -eq 1 ]
+}
+
+@test "step_failed: names the step on a failure, nothing on success or before the first step" {
+    run bt_step_failed 1 "8d, the refusal: a replica that holds data is declined"
+    [ "$status" -eq 0 ]
+    [ "$output" = "boot-test: FAILED (exit 1) in step 8d, the refusal: a replica that holds data is declined" ]
+    run bt_step_failed 0 "8d, the refusal"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    run bt_step_failed 1 ""
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
 }
 
 @test "dropin_verdict: the primary has a binary log and the replica has none" {
@@ -671,6 +715,26 @@ log_bin = mariadb-bin"
     run ! bt_repl_row_verdict "" ""
 }
 
+# run 37842190136 on keel-lxc-1: the client said "Can't connect to server
+# on '::1' (115)" and the run ended with nothing about why the server was
+# not there; the node is asked for its unit and the journals instead
+@test "db_diagnostics_argv: the unit's status and the journals of the server and the first boot, through one shell" {
+    run bt_db_diagnostics_argv mariadb.service
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = sh ]
+    [ "${lines[1]}" = -c ]
+    [ "${lines[2]}" = "systemctl status --no-pager -l mariadb.service; journalctl --no-pager -n 60 -o short-precise -u mariadb.service -u inithooks.service" ]
+    [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "db_diagnostics_argv: refuses an empty unit or one that is not a unit name" {
+    run bt_db_diagnostics_argv ""
+    [ "$status" -eq 1 ]
+    run bt_db_diagnostics_argv "mariadb.service; rm -rf /"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+}
+
 @test "db_argv: the client command for a query this test chooses" {
     output=$(bt_db_argv admin fc42::2 3306 "SELECT marker FROM t")
     [ "$output" = $'mysql\n--user=admin\n--host=fc42::2\n--port=3306\n--protocol=TCP\n--batch\n--skip-column-names\n--execute=SELECT marker FROM t' ]
@@ -682,4 +746,118 @@ log_bin = mariadb-bin"
     run ! bt_db_argv admin fc42::2 3306 ""
     run ! bt_db_argv admin fc42::2 "" "SELECT 1"
     run ! bt_db_argv admin fc42::2 threethousand "SELECT 1"
+}
+
+# the first boot of the platform, and 3306 on the uplink (#29)
+#
+# pct create of Proxmox VE removes /etc/machine-id and writes a preset, so
+# the first start of the container is systemd's first boot, which enables
+# every unit the presets do not disable: mariadb.socket among them, on
+# [::]:3306 (keel-mariadb#29). The gate does the same to each node.
+
+pve_rootfs() {
+    # pve_rootfs: a scratch rootfs with a machine id, printed on stdout
+    local rootfs="$BATS_TEST_TMPDIR/pve-$RANDOM"
+    mkdir -p "$rootfs/etc" "$rootfs/var/lib/dbus"
+    printf '0123456789abcdef0123456789abcdef\n' > "$rootfs/etc/machine-id"
+    printf '%s\n' "$rootfs"
+}
+
+@test "pve_create: removes the machine id, so the next start is systemd's first boot" {
+    rootfs=$(pve_rootfs)
+    run bt_pve_create "$rootfs"
+    [ "$status" -eq 0 ]
+    [ ! -e "$rootfs/etc/machine-id" ]
+    [[ $output == *"first boot"* ]]
+}
+
+@test "pve_create: an empty machine id is removed too, which is not a first boot" {
+    rootfs=$(pve_rootfs)
+    : > "$rootfs/etc/machine-id"
+    bt_pve_create "$rootfs"
+    [ ! -e "$rootfs/etc/machine-id" ]
+}
+
+@test "pve_create: the D-Bus copy goes, a link to the systemd one stays" {
+    rootfs=$(pve_rootfs)
+    printf 'x\n' > "$rootfs/var/lib/dbus/machine-id"
+    bt_pve_create "$rootfs"
+    [ ! -e "$rootfs/var/lib/dbus/machine-id" ]
+    rootfs=$(pve_rootfs)
+    ln -s /etc/machine-id "$rootfs/var/lib/dbus/machine-id"
+    bt_pve_create "$rootfs"
+    [ -L "$rootfs/var/lib/dbus/machine-id" ]
+}
+
+@test "pve_create: writes the preset Proxmox VE writes at create time" {
+    rootfs=$(pve_rootfs)
+    bt_pve_create "$rootfs"
+    [ "$(cat "$rootfs/etc/systemd/system-preset/00-pve.preset")" = "# Added by PVE at create-time for first-boot configuration.
+enable container-getty@.service
+disable getty@.service
+disable sys-kernel-config.mount
+disable sys-kernel-debug.mount
+disable systemd-networkd.service" ]
+}
+
+@test "pve_create: a rootfs with no etc fails loudly" {
+    run bt_pve_create "$BATS_TEST_TMPDIR/nothing"
+    [ "$status" -eq 1 ]
+    [[ $output == *"is not a rootfs"* ]]
+}
+
+# ss -Hltn as iproute2 6 prints it on trixie
+SS_SOCKET='LISTEN 0      4096                                          *:3306             *:*'
+SS_PAIR='LISTEN 0      80                                        [::1]:3306          [::]:*
+LISTEN 0      80                     [fd11:a58a:88ef::ffff:1]:3306          [::]:*
+LISTEN 0      80         [fd11:a58a:88ef:0:382f:45b:553c:f11]:3306          [::]:*'
+
+@test "wildcard_listeners: *, [::] and 0.0.0.0 on the port, with or without a device" {
+    output=$(printf '%s\n' "$SS_SOCKET" | bt_wildcard_listeners 3306)
+    [ "$output" = "*:3306" ]
+    output=$(printf 'LISTEN 0 80 [::]:3306 [::]:*\nLISTEN 0 80 0.0.0.0:3306 0.0.0.0:*\nLISTEN 0 80 *%%eth0:3306 *:*\n' \
+        | bt_wildcard_listeners 3306)
+    [ "$output" = $'[::]:3306\n0.0.0.0:3306\n*%eth0:3306' ]
+}
+
+@test "wildcard_listeners: loopback, an address, another port and other text are not" {
+    output=$(printf '%s\n' "$SS_PAIR" | bt_wildcard_listeners 3306)
+    [ -z "$output" ]
+    output=$(printf 'LISTEN 0 80 *:33060 *:*\nLISTEN 0 80 [::]:13306 [::]:*\nnothing\n\n' | bt_wildcard_listeners 3306)
+    [ -z "$output" ]
+}
+
+@test "wildcard_listeners: refuses a port that is not a number" {
+    run bt_wildcard_listeners ""
+    [ "$status" -eq 1 ]
+    run bt_wildcard_listeners 33x6
+    [ "$status" -eq 1 ]
+}
+
+@test "uplink_verdict: no wildcard and nothing answering on the uplink pass" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_PAIR" 1
+    [ "$status" -eq 0 ]
+    [[ $output == *"node-1: 3306 is not on the uplink [fc42::2]"* ]]
+}
+
+@test "uplink_verdict: a wildcard listener fails and is quoted" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_SOCKET" 1
+    [ "$status" -eq 1 ]
+    [[ $output == *"node-1: 3306 listens on a wildcard address (*:3306)"* ]]
+    [[ $output == *"keel-mariadb#29"* ]]
+}
+
+@test "uplink_verdict: an answer on the uplink fails, also with no wildcard seen" {
+    run bt_uplink_verdict node-1 fc42::2 3306 "$SS_PAIR" 0
+    [ "$status" -eq 1 ]
+    [[ $output == *"node-1: [fc42::2]:3306 answers from the host"* ]]
+}
+
+@test "uplink_verdict: refuses a port or a probe result that is not a number" {
+    run bt_uplink_verdict node-1 fc42::2 port "" 1
+    [ "$status" -eq 2 ]
+    run bt_uplink_verdict node-1 fc42::2 3306 "" ""
+    [ "$status" -eq 2 ]
+    run bt_uplink_verdict node-1 "" 3306 "" 1
+    [ "$status" -eq 2 ]
 }

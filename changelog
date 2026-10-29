@@ -1,3 +1,122 @@
+turnkey-mariadb-19.0 (10) turnkey; urgency=low
+
+  * packages/keel-mariadb/debian/rules is executable in git (mode 755).
+    dpkg-buildpackage sets that mode, so with mode 644 in git the build
+    clone had a local change and the next build-package run stopped with
+    exit 4. No content change.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Sat, 10 Oct 2026 18:45:12 +0000
+
+turnkey-mariadb-19.0 (9) turnkey; urgency=high
+
+  * The build checks the mask of mariadb.socket and mariadb-extra.socket
+    with the link that systemctl mask writes (/etc/systemd/system/<unit>
+    to /dev/null). The systemctl of the build chroot has no is-enabled,
+    so the layer build of 19.0-8 stopped there (step 12, 2026-10-10).
+    19.0-8 was not released; this release has its content and this fix.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Sat, 10 Oct 2026 17:24:15 +0000
+
+turnkey-mariadb-19.0 (8) turnkey; urgency=high
+
+  * Security: 3306 is no longer on the uplink (#29). Debian's
+    mariadb.socket has ListenStream=3306, which systemd binds as
+    [::]:3306. pct create of Proxmox VE removes /etc/machine-id, so the
+    first start of a container is the first boot of systemd, which enables
+    every unit that no preset disables. On the nodes of the pair test
+    (keel 0.23.3, 2026-10-08, finding B3) the socket held 3306 on every
+    address, the server got its listeners from systemd, bind-address had
+    no effect, and 3306 answered on the public uplink. The manifest says
+    expose: mesh, never on the uplink.
+  * conf.d/main disables and masks mariadb.socket and mariadb-extra.socket
+    in the image, and stops the build when a socket unit of the tree can
+    listen on a wildcard address for 3306 and is not masked
+    (bin/keel-socket-wildcard, copied into the tree like
+    bin/keel-project-packages and removed with it).
+  * keel-mariadb 0.1.1 ships a preset that disables both units at a first
+    boot, and its postinst masks both, for a machine whose first boot
+    already ran. It does not restart the server.
+  * The boot test makes each node as pct create does (no machine id, the
+    00-pve.preset) and, after the first boot, checks that nothing listens
+    on a wildcard address for 3306 and that the node address does not
+    answer on 3306 from the host. The appliance job moves to packages.yml
+    and installs the keel-mariadb package built from the branch before the
+    first boot; the check keeps its name.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 09 Oct 2026 01:00:00 +0000
+
+turnkey-mariadb-19.0 (7) turnkey; urgency=medium
+
+  * The image ships the appliance manifest of Keel MariaDB,
+    /usr/share/keel/appliances/mariadb.yaml, from the new package
+    keel-mariadb (packages/keel-mariadb, handbook decision 0041), installed
+    by plan/main from the Keel archive as keel-core and keel-web are. On
+    19.0-5 only core.yaml existed, so a description saying appliance.name:
+    mariadb was refused ("not an installed appliance under
+    /usr/share/keel") and keel inspect inferred core (#25). The manifest:
+    base core, whose five overlays (installer, wireguard, etcd, crowdsec,
+    vip) it inherits with their defaults and adds none; mariadb.service on
+    3306 as a mesh port with Monit's mysql check; the db_password secret,
+    generated if asked and shared by a pair; the db_user option, default
+    admin. A description can now declare the pair of docs/replication.md,
+    appliance.vip and database.server.
+  * conf.d/main proves keel-mariadb installed at the archive's candidate
+    with the other project packages, and runs keel manifest validate
+    mariadb on the built tree, so a manifest the booted machine would refuse
+    fails the build. keel/instance.example.yaml names the appliance, the
+    mode and the five overlays of a simple installation.
+  * tests/package.bats builds and reads the package back, in the new check
+    "packages / build"; tests/coverage.sh leaves it out of the kcov run.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Thu, 08 Oct 2026 21:00:00 +0000
+
+turnkey-mariadb-19.0 (6) turnkey; urgency=medium
+
+  * firstboot.d/35mysqlpass follows inithooks' rule for a first boot nobody
+    can answer (lib/console.sh, INITHOOKS_UNATTENDED, the one 30rootpass and
+    31fqdn follow) instead of testing its own standard input for a terminal.
+    tty1 of an LXC container is a terminal nobody is attached to, so a
+    headless first boot without DB_PASS drew the password box there and
+    waited for good, re-asking when the dialog was killed (#24, two
+    containers of 19.0-5 held for over twelve minutes). When nobody can
+    answer and nothing is declared the hook asks nothing, says so in one
+    line in the inithooks log and the journal, naming the field to declare,
+    and finishes; the account stays as the build published it, unable to
+    authenticate, until the description declares secrets.db_password or
+    keel-init asks it at a console somebody is attached to. When somebody
+    can answer, the dialog is used whatever the hook's standard input is.
+  * conf.d/main fails the build on an inithooks without lib/console.sh
+    (2.3.6+keel22 and later), which would leave the hook unable to run.
+    tests/hook.bats runs the hook with a stand-in for that library.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Thu, 08 Oct 2026 20:30:00 +0000
+
+turnkey-mariadb-19.0 (5) turnkey; urgency=medium
+
+  * The project's packages (inithooks, confconsole, keel) come from the
+    Keel archive, archive.keellinux.org, like every other Keel package,
+    through the source and the 990 pin the parent layer carries
+    (Keel-Linux/common#30; trixie-testing as well with KEEL_APT_TRACK=
+    testing, common#32). The build host's staging archive is gone from the
+    recipe: the Makefile no longer copies it into the bootstrap, and
+    conf.d/main no longer pins it. It held inithooks 2.3.6+keel5,
+    confconsole 2.2.3+keel2 and keel 0.3.5, and its pin at 1001 would have
+    downgraded the layer to them. bin/keel-archive-check, which verified
+    that copy, goes with it.
+  * conf.d/main upgrades the three from the archive and then proves each is
+    installed at apt's candidate, from the Keel archive, in the suite of the
+    track (bin/keel-project-packages, copied into the tree for the build
+    only), in place of the version floors.
+  * The overlay no longer ships /etc/apt/sources.list.d/keel.sources
+    (apt.keellinux.org, disabled) or /etc/apt/preferences.d/keel (the Keel
+    origin at 1001). At 1001 apt downgraded every package newer than the
+    archive's (tracker#23), and both files, at the paths common uses, would
+    override the source and the 990 pin common ships. The build fails if any
+    apt file of the image still names the staging archive.
+    tests/apt-files.bats and tests/project-packages.bats check the recipe.
+
+ -- Marcos Mendez <mendez.foto@gmail.com>  Fri, 02 Oct 2026 17:00:00 +0000
+
 turnkey-mariadb-19.0 (4) turnkey; urgency=medium
 
   * bin/dbpass.py draws its password box on the terminal. firstboot.d/

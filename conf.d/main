@@ -52,14 +52,40 @@ service mysql stop
 # The bind addresses of the overlay are what the server must come up with.
 grep -qx 'bind-address = ::1,127.0.0.1' /etc/mysql/mariadb.conf.d/99-keel-bind.cnf
 
+# The socket units of mariadb-server are disabled and masked (#29).
+# mariadb.socket has ListenStream=3306, which systemd binds as [::]:3306, on
+# every address of the machine. With the socket active the server gets its
+# listeners from systemd and the bind-address above has no effect. Debian's
+# package enables neither unit, but the first boot of systemd enables every
+# unit that no preset disables, and pct create of Proxmox VE makes the first
+# start of a container a first boot: on the real nodes 3306 answered on the
+# public uplink. Only a mask stops that. mariadb-extra.socket also starts
+# the server with sockets from systemd, so it goes too. The keel-mariadb
+# package (0.1.1 and later) ships a preset and masks both as well; the image
+# does not depend on the version of it the archive has.
+for unit in mariadb.socket mariadb-extra.socket; do
+    rm -f "/etc/systemd/system/sockets.target.wants/$unit"
+    systemctl mask "$unit"
+    # The mask is the link to /dev/null that systemctl mask writes. It is
+    # read from the tree: the systemctl of the build chroot (common's
+    # systemd-chroot wrapper) has no is-enabled, and the build failed on it.
+    [ "$(readlink "/etc/systemd/system/$unit")" = /dev/null ]
+done
+
+# No socket unit of the tree can listen on a wildcard address for 3306, the
+# two above or any other. bin/keel-socket-wildcard was copied into the tree
+# for this (Makefile, root.patched/pre) and leaves with it.
+/usr/local/lib/keel-build/keel-socket-wildcard / 3306
+
 # webmin-mysql is what puts the database in the panel core already carries;
 # the plan asks for it, so fail the build rather than ship a panel without
 # its database module (the boot test checks the running appliance too).
 dpkg-query -W -f '${Status}' webmin-mysql | grep -qx 'install ok installed'
 
 # fab-plan-resolve keeps a package the parent layer already carries at the
-# parent's version, so the two core packages are upgraded here from the
-# build time source (keel, new in the plan, was installed from it already).
+# parent's version, so the project's packages are upgraded here, from the
+# Keel archive the parent layer names (overlays/turnkey.d/keel-apt of
+# common; trixie-testing as well when the build has KEEL_APT_TRACK=testing).
 #
 # The overlay of this layer ships /etc/confconsole/services.txt, which is a
 # conffile of confconsole, so dpkg sees it as locally modified and asks what
@@ -67,48 +93,49 @@ dpkg-query -W -f '${Status}' webmin-mysql | grep -qx 'install ok installed'
 # file at the prompt and leaves confconsole "install ok unpacked", which
 # fails this script. Keep the overlay's file without asking.
 export DEBIAN_FRONTEND=noninteractive
+apt-get update --error-on=any
 apt-get install -y --only-upgrade \
     -o Dpkg::Options::=--force-confdef \
     -o Dpkg::Options::=--force-confold \
-    inithooks confconsole
+    inithooks confconsole keel
 
 # A half configured package keeps its new version, so check the state too.
 [[ $(dpkg-query -W -f '${Status}\n' inithooks confconsole keel \
     | grep -c '^install ok installed$') -eq 3 ]]
 
-# A floor, not a literal: the declarative first boot this layer depends on
-# landed in these versions, and a build that read a stale index would ship
-# a layer whose whole point does not work. keel-nodebb's
-# conf.d/zz-project-packages is where the archive freshness check itself is
-# maintained; this is the minimum, which is what publishing this layer
-# requires.
-#
-# keel 0.3.5 is the floor because the two node gate configures replication
-# from the description on the booted machine: that needs the database section
-# (0.3.0), what inspect and diff read back from it (0.3.1 to 0.3.3), the role
-# configuration apply writes (0.3.4) and promotion (0.3.5). A layer built with
-# keel 0.2.1 answers "database: unknown top level key" and the gate fails, so
-# the floor is the version the layer is published to carry.
-while read -r package floor; do
-    installed=$(dpkg-query -W -f '${Version}' "$package")
-    dpkg --compare-versions "$installed" ge "$floor" \
-        || { echo "$package $installed is older than $floor" >&2; exit 1; }
-done <<EOF
-inithooks 2.3.6+keel4
-confconsole 2.2.3+keel2
-keel 0.3.5
-EOF
-dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel
+# Not a floor and not a literal: each of the three, and keel-mariadb, the
+# layer's own package plan/main asks for, is installed at the version the
+# Keel archive offers as its candidate, from the suite of the track this
+# build reads. A build that read a stale index, or any other source, stops
+# here instead of shipping a layer that is not what the archive says it is.
+# bin/keel-project-packages was copied into the tree for this (Makefile,
+# root.patched/pre) and leaves with it.
+/usr/local/lib/keel-build/keel-project-packages inithooks confconsole keel keel-mariadb
+rm -rf /usr/local/lib/keel-build
+dpkg-query -W -f '${Package} ${Version} ${Status}\n' inithooks confconsole keel keel-mariadb
 
-# The build time package source is not for appliances: remove the source
-# entry, the copy of the archive it names and the keyring the build verified
-# that archive with, and keep the documented, disabled entry for the future
-# signed repository (overlay). The staging key signs whatever the build host
-# produced, so an image that kept it would carry trust in a nightly
-# (tracker#7). common/removelists-final/turnkey removes the same three paths
-# at the end of the build, whatever a recipe does.
-rm -f /etc/apt/sources.list.d/keel-staging.list
-rm -f /etc/apt/keyrings/keel-staging-keyring.asc
-rm -rf /srv/keel-apt
+# The appliance manifest (packages/keel-mariadb, handbook decision 0041):
+# on an image without it a spec saying appliance.name: mariadb was refused
+# and keel inspect inferred core (#25). It is validated and resolved along
+# its chain on this very tree, with Core's manifest, the overlays' and the
+# units they name in place, so a manifest the booted machine would refuse
+# fails the build instead.
+[ -f /usr/share/keel/appliances/mariadb.yaml ]
+keel manifest validate mariadb
+
+# firstboot.d/35mysqlpass asks nothing on a first boot nobody can answer,
+# by the rule of inithooks' lib/console.sh (2.3.6+keel22 and later), the
+# one 30rootpass and 31fqdn follow. An inithooks without that library would
+# leave the hook unable to run at all, so the build stops here instead.
+[ -f /usr/lib/inithooks/lib/console.sh ]
+
+# No build time package source exists any more, and none may reach the
+# image: nothing the image keeps may name the build host's old staging
+# archive, its pin or its keyring, and the apt lists are not shipped.
 rm -rf /var/lib/apt/lists/*
-grep -q '^Enabled: no' /etc/apt/sources.list.d/keel.sources
+if grep -rlsE 'trixie-staging|/srv/keel-apt|l=Keel Linux staging|keel-staging' /etc/apt/sources.list \
+    /etc/apt/sources.list.d /etc/apt/preferences /etc/apt/preferences.d /etc/apt/keyrings; then
+    echo "the apt files above name the build host's staging archive" >&2
+    exit 1
+fi
+[ ! -e /usr/local/lib/keel-build ]

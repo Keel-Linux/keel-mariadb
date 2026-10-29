@@ -1,0 +1,105 @@
+#!/bin/bash
+# keel-socket-wildcard ROOT [PORT]: no socket unit of the tree at ROOT can
+# listen on a wildcard address for PORT (default 3306), unless it is masked.
+#
+# Debian's mariadb-server ships mariadb.socket with ListenStream=3306, which
+# systemd binds as [::]:3306, on every address of the machine. The package
+# enables nothing, but the first boot of systemd enables every unit that no
+# preset disables, and pct create of Proxmox VE makes the first start of a
+# container a first boot. The socket then holds 3306 on the uplink, the
+# server gets the socket from systemd, and its bind-address has no effect
+# (keel-mariadb#29). A disabled unit is therefore not enough: only a masked
+# unit (a link to /dev/null under etc/systemd/system) is safe.
+#
+# Runs inside the build tree, from conf.d/main, with ROOT /: the Makefile
+# installs it there before the conf scripts run (root.patched/pre), and
+# conf.d/main removes it again. It reads files only.
+#
+# A unit is read as systemd reads it: the first file of its name under
+# etc/systemd/system, usr/lib/systemd/system and lib/systemd/system, then
+# its drop-ins (NAME.d/*.conf) in the order of their names; an empty
+# Listen*= clears the addresses before it. A wildcard is the port alone,
+# 0.0.0.0:PORT or [::]:PORT.
+#
+# Exit codes: 0 no unit can listen on a wildcard for PORT; 1 one can, and
+# each such unit is named on standard error; 2 a usage error.
+set -euo pipefail
+
+UNIT_DIRS="etc/systemd/system usr/lib/systemd/system lib/systemd/system"
+
+usage() {
+    echo "usage: keel-socket-wildcard ROOT [PORT]" >&2
+    exit 2
+}
+
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then usage; fi
+root=$1
+port=${2:-3306}
+[ -d "$root" ] || usage
+case "$port" in ''|*[!0-9]*) usage ;; esac
+
+# The Listen* lines of a unit and its drop-ins, read in order. The awk
+# program keeps the addresses that are left after the last reset and
+# prints the ones that are a wildcard for the port.
+# One rule per line, so each is a line of this script that runs.
+LISTEN_PROGRAM='function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }'
+LISTEN_PROGRAM+=' /^[ \t]*[#;]/ { next }'
+LISTEN_PROGRAM+=' { split($0, kv, "="); key = trim(kv[1]) }'
+LISTEN_PROGRAM+=' key !~ /^Listen(Stream|Datagram|SequentialPacket)$/ { next }'
+LISTEN_PROGRAM+=' { value = trim(substr($0, index($0, "=") + 1)) }'
+LISTEN_PROGRAM+=' value == "" { n = 0; next }'
+LISTEN_PROGRAM+=' value == port || value == "0.0.0.0:" port || value == "[::]:" port { found[++n] = key "=" value }'
+LISTEN_PROGRAM+=' END { for (i = 1; i <= n; i++) print found[i] }'
+
+# unit_files NAME: the unit file systemd uses for NAME, then its drop-ins
+unit_files() {
+    local name=$1 dir file
+    for dir in $UNIT_DIRS; do
+        file=$root/$dir/$name
+        if [ -e "$file" ] || [ -L "$file" ]; then
+            printf '%s\n' "$file"
+            break
+        fi
+    done
+    # the drop-ins of every directory, in the order of their file names
+    for dir in $UNIT_DIRS; do
+        for file in "$root/$dir/$name.d"/*.conf; do
+            [ -f "$file" ] || continue
+            printf '%s\t%s\n' "${file##*/}" "$file"
+        done
+    done | sort -s -k1,1 | cut -f2-
+}
+
+# masked NAME: the unit is a link to /dev/null under etc/systemd/system
+masked() {
+    local link=$root/etc/systemd/system/$1
+    [ -L "$link" ] && [ "$(readlink "$link")" = /dev/null ]
+}
+
+# socket_names: the name of every socket unit of the tree, once each
+socket_names() {
+    local dir file
+    for dir in $UNIT_DIRS; do
+        for file in "$root/$dir"/*.socket; do
+            [ -e "$file" ] || [ -L "$file" ] || continue
+            printf '%s\n' "${file##*/}"
+        done
+    done | sort -u
+}
+
+mapfile -t names < <(socket_names)
+
+failed=0
+for name in "${names[@]+"${names[@]}"}"; do
+    masked "$name" && continue
+    mapfile -t files < <(unit_files "$name")
+    listening=$(cat "${files[@]}" | awk -v port="$port" "$LISTEN_PROGRAM")
+    [ -n "$listening" ] || continue
+    while read -r line; do
+        echo "keel-socket-wildcard: $name: $line listens on every address for $port; mask it" >&2
+    done <<< "$listening"
+    failed=1
+done
+
+[ "$failed" -eq 0 ] || exit 1
+echo "keel-socket-wildcard: no socket unit under $root can listen on a wildcard for $port"

@@ -1,0 +1,60 @@
+# Forgejo copy of .github/workflows/tests.yml (decision 0056): the same
+# jobs, with a runs-on line on each call of a reusable workflow,
+# because Forgejo runs a called workflow on the runner of the caller.
+# Tests of the keel-mariadb layer recipe (decision 0006 point 4):
+#   tests:     the first boot library, the first boot hook and the boot
+#              test's library under bats and kcov, on hosted runners, with
+#              the threshold committed here
+#   appliance: in .github/workflows/packages.yml, beside the build of the
+#              keel-mariadb package it installs before the first boot
+#   package:   a change that the layer ships needs a changelog entry, so it
+#              can reach a machine
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # tests/coverage.sh measures three shell files (COVERAGE.md): the first
+    # boot library at 100 percent, the first boot hook at 96.00 (the one
+    # uncovered line is the process substitution kcov attributes to no
+    # line) and the boot test's library at 100. The threshold is the lowest
+    # of them and is only ever raised (decision 0006). This job produces
+    # the check "tests / coverage", the required status on main. The job id
+    # is part of that name, so renaming it silently detaches the protection
+    # rule.
+    runs-on: keel-host
+    uses: keel-linux/.github/.github/workflows/test-shell.yml@main
+    with:
+      threshold: 95
+  package:
+    # Only on a pull request. require-changelog compares the two commits of
+    # the pull request, which it reads from
+    # github.event.pull_request.base.sha; outside a pull request that is
+    # empty and the script is handed one argument instead of two, so every
+    # push to main failed the check. The keel repository already gates it
+    # this way. A job whose condition is false is reported as skipped,
+    # which satisfies a required status, so protection keeps working and
+    # the check is still a real run on the pull request itself, which is
+    # the only place it can say anything.
+    if: github.event_name == 'pull_request'
+    # This recipe has no debian/changelog: what bt-layer records in the
+    # manifest is the top entry of ./changelog, which is also what
+    # make-release-deb.py turns into the release package. So that is the
+    # file a change which ships has to bump. This job produces the check
+    # "package / changelog".
+    runs-on: keel-host
+    uses: keel-linux/.github/.github/workflows/require-changelog.yml@main
+    with:
+      changelog: changelog
+      # keel/ is the example instance description, which the layer does not
+      # ship; evidence/ holds the records of runs on the real platform that
+      # a pull request carries (job URLs, output, timings), which ship
+      # nothing either; the rest is the reusable workflow's own default.
+      exempt: '^(tests/|docs/|\.github/|\.forgejo/|keel/|evidence/|README|COVERAGE\.md|LICENSE|\.gitignore)'

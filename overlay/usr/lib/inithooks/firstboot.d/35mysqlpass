@@ -15,6 +15,17 @@
 # variable fab passes to the conf scripts inside the chroot. It never
 # reaches the inithooks conf and no hook reads it. Nothing here uses it.
 #
+# Whether anybody can answer the dialog is inithooks' rule, lib/console.sh,
+# the one 30rootpass and 31fqdn follow: run asks once and hands the answer
+# to every hook in INITHOOKS_UNATTENDED. This hook used to test its own
+# standard input for a terminal instead, and tty1 of an LXC container is a
+# terminal nobody is attached to: a headless first boot without DB_PASS
+# drew the password box there and waited for good (keel-mariadb#24). When
+# nobody can answer and nothing is declared, the hook asks nothing, says so
+# in one line and finishes; the account stays as conf.d/main published it,
+# unable to authenticate, until the description declares the password or
+# keel-init asks it at a console somebody is attached to.
+#
 # Decisions live in lib/mariadb.sh; this file is the part that touches the
 # system, and bin/dbpass.py is the only dialog.
 
@@ -23,6 +34,8 @@ INITHOOKS_DEFAULT="${INITHOOKS_DEFAULT:-/etc/default/inithooks}"
 source "$INITHOOKS_DEFAULT"
 # shellcheck source=../lib/mariadb.sh
 source "$INITHOOKS_PATH/lib/mariadb.sh"
+# shellcheck source=/usr/lib/inithooks/lib/console.sh
+source "$INITHOOKS_PATH/lib/console.sh"
 
 fatal() { echo "fatal [35mysqlpass]: $*" >&2; exit 1; }
 
@@ -36,8 +49,12 @@ user=$(mariadb_admin_user "${APP_DB_USER-}") \
 
 mapfile -t missing < <(mariadb_missing_values "${DB_PASS-}")
 if [[ ${#missing[@]} -gt 0 ]]; then
-    [[ -t 0 ]] || fatal "no ${missing[*]} in $INITHOOKS_CONF and no terminal to" \
-        "ask on: declare secrets.db_password in the instance description"
+    if console_unattended; then
+        console_skipped 35mysqlpass "no ${missing[*]} in $INITHOOKS_CONF: the \
+MariaDB account '$user' stays unable to authenticate; declare \
+secrets.db_password in the instance description, or keel-init asks it"
+        exit 0
+    fi
     while IFS='=' read -r key value; do
         [[ -n "$key" ]] && declare "$key=$value"
     done < <("$INITHOOKS_PATH/bin/dbpass.py" "${missing[@]}")

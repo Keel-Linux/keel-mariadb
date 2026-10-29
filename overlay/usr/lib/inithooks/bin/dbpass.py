@@ -1,10 +1,11 @@
 #!/usr/bin/python3
 """Ask for the database values that the inithooks conf did not provide.
 
-Called by firstboot.d/35mysqlpass only when a terminal is attached and a
-value is absent; prints one KEY=value line per requested name on stdout so
-the hook keeps the decisions and this file keeps the dialogs. On a headless
-first boot the hook fails instead of calling this, because the value it
+Called by firstboot.d/35mysqlpass only when a value is absent and somebody
+can answer the console (lib/console.sh of inithooks, INITHOOKS_UNATTENDED);
+prints one KEY=value line per requested name on stdout so the hook keeps
+the decisions and this file keeps the dialogs. On a first boot nobody can
+answer the hook asks nothing instead of calling this, because the value it
 needs is declared: secrets.db_password of the instance description.
 
 Syntax: dbpass.py NAME [NAME ...]      NAME is DB_PASS

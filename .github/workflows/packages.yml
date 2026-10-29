@@ -1,0 +1,33 @@
+# Light CI on GitHub-hosted runners, for pull requests on the GitHub mirror
+# (decision 0056). The full CI is .forgejo/workflows on git.pop.coop, and
+# .forgejo/workflows/packages.yml has the notes on each job.
+#
+# Jobs on Forgejo only (no GitHub-hosted version): appliance.
+name: packages
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: keel-linux/.github/.github/workflows/github-debian-build.yml@main
+    with:
+      timeout: 15
+      artifact-dir: dist
+      artifact-name: keel-mariadb-deb
+      run: |
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends \
+          ca-certificates git build-essential debhelper lintian bats \
+          python3-yaml
+        work="$(mktemp -d)"
+        cp -a packages/keel-mariadb "$work/src"
+        (cd "$work/src" && dpkg-buildpackage -us -uc)
+        lintian --fail-on error,warning --info --display-info \
+          "$work"/keel-mariadb_*.changes
+        mkdir -p dist
+        cp "$work"/*.deb "$work"/*.dsc "$work"/*.tar.* "$work"/*.changes dist/
+        bats tests/package.bats

@@ -1,0 +1,67 @@
+#!/bin/bash
+# keel-project-packages [PACKAGE...]: the project packages of this layer are
+# installed at the version apt offers as their candidate, and that version
+# comes from the Keel archive, from the suite of the track the build reads.
+#
+# Runs inside the build tree, from conf.d/main, after the upgrade and before
+# the apt lists are removed: the Makefile installs it there before the conf
+# scripts run (root.patched/pre) and conf.d/main removes it again. It
+# replaces the check against the build host's staging archive, which held
+# versions far older than the archive (inithooks 2.3.6+keel5 and the like)
+# and, pinned at 1001, would have downgraded the layer to them.
+#
+#   PACKAGE...        default: inithooks confconsole keel
+#   KEEL_APT_TRACK    stable (trixie, the default) or testing (trixie-testing)
+#   KEEL_ARCHIVE_HOST archive.keellinux.org
+#
+# Exit codes: 0 every package is current from the Keel archive; 1 one is not
+# installed, not at its candidate, or its candidate is not the Keel archive's
+# in that suite; 2 an unknown track.
+set -euo pipefail
+
+KEEL_ARCHIVE_HOST="${KEEL_ARCHIVE_HOST:-archive.keellinux.org}"
+APT_CACHE="${APT_CACHE:-apt-cache}"
+DPKG_QUERY="${DPKG_QUERY:-dpkg-query}"
+
+case "${KEEL_APT_TRACK:-stable}" in
+    stable) suite=trixie ;;
+    testing) suite=trixie-testing ;;
+    *) echo "keel-project-packages: KEEL_APT_TRACK must be 'stable' or 'testing', got '${KEEL_APT_TRACK}'" >&2
+       exit 2 ;;
+esac
+
+[ $# -gt 0 ] || set -- inithooks confconsole keel
+
+# candidate_from_keel POLICY VERSION: true when the version block of VERSION
+# in apt-cache policy's table names the Keel archive's SUITE/main.
+# The awk program is one string: a version line of the table sets v, a
+# source line under the wanted version that names the suite sets found.
+CANDIDATE_PROGRAM='/^ (\*\*\*| {3}) [^ ]+ -?[0-9]+$/ { v = ($1 == "***") ? $2 : $1; next } v == want && index($0, "https://" host " " suite "/main ") { found = 1 } END { exit !found }'
+candidate_from_keel() {
+    awk -v want="$2" -v host="$KEEL_ARCHIVE_HOST" -v suite="$suite" "$CANDIDATE_PROGRAM" <<< "$1"
+}
+
+failed=0
+for package in "$@"; do
+    status="$("$DPKG_QUERY" -W -f '${Status} ${Version}' "$package" 2>/dev/null || true)"
+    if [[ "$status" != "install ok installed "* ]]; then
+        echo "keel-project-packages: $package is not installed" >&2
+        failed=1
+        continue
+    fi
+    installed="${status##* }"
+    policy="$("$APT_CACHE" policy "$package")"
+    candidate="$(awk '$1 == "Candidate:" { print $2; exit }' <<< "$policy")"
+    if [ "$installed" != "$candidate" ]; then
+        echo "keel-project-packages: $package is $installed, the archive offers $candidate" >&2
+        failed=1
+        continue
+    fi
+    if ! candidate_from_keel "$policy" "$candidate"; then
+        echo "keel-project-packages: $package $candidate is not from https://$KEEL_ARCHIVE_HOST $suite" >&2
+        failed=1
+        continue
+    fi
+    echo "keel-project-packages: $package $installed from $KEEL_ARCHIVE_HOST $suite"
+done
+exit "$failed"

@@ -12,9 +12,15 @@ the machine matches the description.
   `keel-linux/.github`) runs it on the self-hosted LXC runner after pulling
   the layers from `https://mirror.keellinux.org/layers` and checking them
   with `keel verify`. It is the thin main: assemble, mark the tree as a
-  container, install the description, the secrets and the conf, start the
-  container, wait, connect to the database, check Webmin, `keel diff`. It
-  builds nothing, so it needs no fab, deck or buildtasks.
+  container, do to the tree what `pct create` of Proxmox VE does (no
+  machine id, its preset, so the first start is the first boot of
+  systemd), install the description, the secrets and the conf, start the
+  container, wait, connect to the database, check that 3306 is not on the
+  uplink (no wildcard listener, no answer from the host; #29), check
+  Webmin, `keel diff`. It builds nothing, so it needs no fab, deck or
+  buildtasks. The workflow installs the keel-mariadb package built from
+  the branch before the first boot (`package_artifact`), so the job is in
+  `packages.yml`, beside that build.
 - `lib/boot-test-lib.sh`: the logic (argument parsing, address discovery
   from `lxc-info`, waiting with a deadline, the secret files, the client
   call, the database, module and Webmin verdicts, the diff verdict, and the
@@ -33,9 +39,19 @@ the machine matches the description.
   `overlay/usr/lib/inithooks/lib/mariadb.sh`, the logic behind the first
   boot hook `35mysqlpass`.
 - `hook.bats`: the hook itself, run for real against scratch directories
-  with every system command stubbed.
-- `coverage.sh`: runs the bats suite under kcov and fails when any measured
-  file is below `COVERAGE_THRESHOLD` (default 95).
+  with every system command stubbed, and inithooks' `lib/console.sh` a
+  stand-in that answers from `INITHOOKS_UNATTENDED`, as `run` exports it.
+- `socket-wildcard.bats`: `bin/keel-socket-wildcard`, the build check of
+  `conf.d/main`, against scratch trees: a socket unit that can listen on a
+  wildcard address for 3306 and is not masked fails the build (#29).
+- `package.bats`: builds `packages/keel-mariadb` with `dpkg-buildpackage`
+  and reads back its fields, its files, the manifest and the preset, and
+  runs its maintainer scripts with `deb-systemd-helper` stubbed. Needs `dpkg-dev`,
+  `debhelper` and `python3-yaml` besides `bats`; it runs in the check
+  `packages / build` (`.github/workflows/packages.yml`), with lintian over
+  the source and binary package, and not under `coverage.sh`.
+- `coverage.sh`: runs every bats suite but `package.bats` under kcov and
+  fails when any measured file is below `COVERAGE_THRESHOLD` (default 95).
 - `instance.yaml`: the description the test container boots from. It
   declares `secrets.db_password` from a file, which is the point of the
   test.
@@ -48,9 +64,23 @@ Debian packages `bats` (1.11) and `kcov` (43); no root:
     bats tests/hook.bats
     bats tests/boot-test.bats
     bats tests/dbpass.bats
+    bats tests/socket-wildcard.bats
     COVERAGE_THRESHOLD=95 tests/coverage.sh
 
 `COVERAGE_DIR=coverage tests/coverage.sh` keeps the kcov reports.
+
+## The package on a built image
+
+What the manifest does on a machine is proven on an image built from this
+branch, since the boot test boots the published layer: `conf.d/main` runs
+`keel manifest validate mariadb` on the built tree, and on the booted
+container `keel manifest show mariadb --resolved` lists Core's five
+overlays and the server, `keel inspect` writes `appliance.name: mariadb`,
+and a description with `appliance.name: mariadb`, `installation.mode`, the
+five overlays written out and `app.options.db_user` passes `keel spec
+validate`. `tests/instance.yaml` does not name the appliance yet: the gate
+boots the published layer, and 19.0-5 has no manifest to hold the name
+against. It gains the section once a layer with the package is published.
 
 ## The boot test by hand
 
@@ -157,29 +187,38 @@ in each node's own rootfs once the addresses exist: its role, the addresses
 it answers on, and either the prefix it authorises or the endpoint it
 replicates from. Nothing in it configures the other machine.
 
-In order:
+In order, each step named in the log (`step 8b, ...`) and in the last line
+of a failed run (`boot-test: FAILED (exit N) in step ...`):
 
-1. each node's description gains its `database.server` section;
-2. **the refusal, on a real server.** The replica is given a database of its
-   own, `operatordata`, and told to become a replica. keel must exit 16, say
-   what it refused, and leave replication stopped. Becoming a replica
-   replaces the local database, and it is the one property of this feature
-   that loses data if it is wrong, so the gate asserts it and not only the
-   unit tests. The database is then dropped;
-3. the primary converges, and its drop-in is read back: a server id and a
-   binary log;
-4. each node's database confirmed reachable from the other over IPv6;
-5. the administrative host row on the replica;
-6. the replica converges, and its drop-in is read back: a server id and no
-   binary log, because it reads the primary's;
-7. the server is asked what it thinks it is (`Slave_running`, not the
+1. (8a) each node's description gains its `database.server` section;
+2. (8b) **the primary converges first**, and its drop-in is read back: a
+   server id and a binary log. keel asks the primary whether it answers as
+   the replication account before it looks at the replica's data, so a
+   replica applied before this step is refused for the primary's silence
+   and the refusal over data is never asked (run 37838543320, 2026-10-08,
+   `the primary [...]:3306 did not answer as 'repl'`);
+3. (8c) the primary's database confirmed reachable from the replica over
+   IPv6, at a literal address;
+4. (8d) **the refusal, on a real server.** The replica is given a database
+   of its own, `operatordata`, and told to become a replica. keel must exit
+   16, say what it refused, and leave replication stopped. Becoming a
+   replica replaces the local database, and it is the one property of this
+   feature that loses data if it is wrong, so the gate asserts it and not
+   only the unit tests. A refusal for any other reason fails the step and
+   is quoted. The database is then dropped;
+5. (8e) the administrative host row on the replica;
+6. (8f) the replica converges, and its drop-in is read back: a server id
+   and no binary log, because it reads the primary's;
+7. (8g) the replica's database confirmed reachable from the primary, now
+   that its apply gave it its listening address;
+8. (8h) the server is asked what it thinks it is (`Slave_running`, not the
    configuration read back), and the primary is asked what it granted;
-8. **`keel diff` on both nodes, with no drift.** It runs here and no longer
-   before the phase: the machines are now what their descriptions say, which
-   is the whole claim. Before the apply they were not;
-9. a value generated on the host for this run, written on the primary and
-   read from the replica **from the primary container** over IPv6. The same
-   value appearing there can only mean replication carried it.
+9. (8i) **`keel diff` on both nodes, with no drift.** It runs here and no
+   longer before the phase: the machines are now what their descriptions
+   say, which is the whole claim. Before the apply they were not;
+10. (8j) a value generated on the host for this run, written on the primary
+    and read from the replica **from the primary container** over IPv6. The
+    same value appearing there can only mean replication carried it.
 
 `secrets.app_password` in `tests/instance.yaml` is the replication
 credential, and `database.server.replication.secret` names its file. It is
