@@ -16,9 +16,13 @@ include $(FAB_PATH)/common/mk/turnkey/mysql.mk
 COMMON_OVERLAYS += $(CURDIR)/overlay
 
 # Webmin comes from core and answers on 12321; plan/main adds the database
-# module for it. Nothing here serves a web page, so 80 and 443 stay shut:
-# 3306 is the database, 12321 the panel, 12320 the web shell core carries.
-WEBMIN_FW_TCP_INCOMING = 22 3306 12320 12321
+# module for it. This list holds the uplink ports only: 22 for SSH and
+# 12321 for the panel. Nothing here serves a web page, so 80 and 443 stay
+# shut. 3306 is a mesh port of the manifest (expose: mesh): keel opens it
+# only on the WireGuard interface (keel/manifest/firewall.py, decision
+# 0041, item 6), so it is not here (#31). Keel Core has no web shell, so
+# 12320 is not here either. tests/firewall.bats reads this line.
+WEBMIN_FW_TCP_INCOMING = 22 12321
 
 include $(FAB_PATH)/common/mk/turnkey.mk
 

@@ -41,6 +41,9 @@ the machine matches the description.
 - `hook.bats`: the hook itself, run for real against scratch directories
   with every system command stubbed, and inithooks' `lib/console.sh` a
   stand-in that answers from `INITHOOKS_UNATTENDED`, as `run` exports it.
+- `firewall.bats`: the ports that the Makefile opens on the uplink (22 and
+  12321, not 3306 and not 12320, #31), and the services screen, which
+  names no web shell.
 - `socket-wildcard.bats`: `bin/keel-socket-wildcard`, the build check of
   `conf.d/main`, against scratch trees: a socket unit that can listen on a
   wildcard address for 3306 and is not masked fails the build (#29).

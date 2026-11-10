@@ -42,7 +42,14 @@ console_unattended() {
 console_skipped() {
     echo "[$1] not asked, nobody can answer ($INITHOOKS_UNATTENDED): $2" >&2
 }
+# console_skipped, and the hook in the record that keeps the fence up, so
+# the first login starts keel-init (inithooks 2.3.6+keel35)
+console_deferred() {
+    console_skipped "$1" "$2"
+    echo "$1" >> "$INITHOOKS_DEFERRED"
+}
 LIB
+    export INITHOOKS_DEFERRED="$scratch/deferred"
     export INITHOOKS_DEFAULT="$scratch/default-inithooks"
     export INITHOOKS_CONF="$scratch/inithooks.conf"
     export CALLS="$scratch/calls"
@@ -132,6 +139,21 @@ DECLARED_PASS=s3cret-from-the-description
     [[ "$output" == *"[35mysqlpass] not asked, nobody can answer (the console has no size, nobody is attached to it): no DB_PASS in $INITHOOKS_CONF"* ]]
     [[ "$output" == *"the MariaDB account 'admin' stays unable to authenticate"* ]]
     [[ "$output" == *"declare secrets.db_password in the instance description, or keel-init asks it"* ]]
+    [ ! -f "$CALLS" ]
+    # the question is in the record for keel-init: with root declared and
+    # this one not, nothing else keeps the fence up, and the first login
+    # does not start keel-init (keel-lnmp, commissioning, 2026-11-06)
+    [ "$(cat "$INITHOOKS_DEFERRED")" = 35mysqlpass ]
+}
+
+@test "an inithooks without console_deferred: the same line, and no record" {
+    sed -i '/^console_deferred() {/,/^}/d' "$scratch/inithooks/lib/console.sh"
+    printf 'export HOSTNAME=db\n' > "$INITHOOKS_CONF"
+    export INITHOOKS_UNATTENDED="there is no terminal"
+    run "$HOOK" < /dev/null
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[35mysqlpass] not asked, nobody can answer (there is no terminal): no DB_PASS"* ]]
+    [ ! -e "$INITHOOKS_DEFERRED" ]
     [ ! -f "$CALLS" ]
 }
 

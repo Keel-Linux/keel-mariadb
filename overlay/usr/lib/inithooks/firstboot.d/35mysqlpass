@@ -50,7 +50,16 @@ user=$(mariadb_admin_user "${APP_DB_USER-}") \
 mapfile -t missing < <(mariadb_missing_values "${DB_PASS-}")
 if [[ ${#missing[@]} -gt 0 ]]; then
     if console_unattended; then
-        console_skipped 35mysqlpass "no ${missing[*]} in $INITHOOKS_CONF: the \
+        # console_deferred also puts the hook in the record that keeps the
+        # fence up, so the first login starts keel-init. With the root
+        # password declared and this one not, nothing else would, and the
+        # account would stay locked with no word at the login. An inithooks
+        # older than 2.3.6+keel35 has console_skipped only.
+        skip=console_skipped
+        if declare -F console_deferred >/dev/null; then
+            skip=console_deferred
+        fi
+        "$skip" 35mysqlpass "no ${missing[*]} in $INITHOOKS_CONF: the \
 MariaDB account '$user' stays unable to authenticate; declare \
 secrets.db_password in the instance description, or keel-init asks it"
         exit 0

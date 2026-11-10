@@ -96,7 +96,10 @@ and accepts password authentication from anywhere. This layer listens on
 appliance above it is on the same machine. An appliance that really has
 remote clients opens the port, says who may connect and terminates TLS.
 That is a decision an appliance makes, not one a database layer makes for
-every appliance built on it.
+every appliance built on it. The Webmin firewall of the recipe
+(``WEBMIN_FW_TCP_INCOMING`` of the Makefile) opens only 22 and 12321 on the
+uplink. On a pair, keel opens 3306, a mesh port of the manifest, only on
+the WireGuard interface (issue #31).
 
 The socket units of ``mariadb-server`` are masked in the image, and the
 ``keel-mariadb`` package disables them in a preset and masks them too
@@ -152,7 +155,10 @@ The hook used to test its own standard input for a terminal, and tty1 of
 an LXC container is a terminal nobody is attached to, so a headless first
 boot without ``DB_PASS`` waited for good at a box nobody could see
 (issue #24). Now, when nobody can answer and nothing is declared, the hook
-asks nothing, says so in one line in the inithooks log and finishes; the
+asks nothing, says so in one line in the inithooks log and finishes. It
+also writes its name in the record of the questions left for keel-init
+(``console_deferred``), so the first login starts keel-init, also when the
+description declares the root password and not this one. The
 account stays as the build published it, unable to authenticate, until the
 description declares ``secrets.db_password`` or ``keel-init`` asks it at a
 console somebody is attached to. The build fails on an inithooks without

@@ -1,3 +1,22 @@
+turnkey-mariadb-19.0 (12) turnkey; urgency=medium
+
+  * firstboot.d/35mysqlpass writes its question in the record of keel-init
+    (console_deferred of inithooks' lib/console.sh) when nobody can answer
+    the first boot and no database password is declared. Before, it wrote
+    only a log line (console_skipped). A description that declared the
+    root password and not the database password then left no record, the
+    first login did not start keel-init, and the admin account stayed
+    unable to authenticate. keel-lnmp has the same change. An inithooks
+    without console_deferred gets the log line as before.
+  * The Webmin firewall of the recipe opens 22 and 12321 on the uplink, and
+    no longer 3306 and 12320 (#31). 3306 is a mesh port of the manifest:
+    keel opens it only on the WireGuard interface (decision 0041, item 6).
+    Keel Core has no web shell on 12320, so that port and the two "Web
+    shell" lines of the services screen are gone. tests/firewall.bats
+    reads the Makefile and the screen.
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Tue, 10 Nov 2026 12:00:00 +0000
+
 turnkey-mariadb-19.0 (11) turnkey; urgency=medium
 
   * Stable 1 refresh of 2026-10-30 (decision 0073). The image is built again
