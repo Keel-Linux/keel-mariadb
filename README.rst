@@ -62,6 +62,21 @@ Webmin comes from ``core`` and answers on 12321; this layer adds
 included is a property of this distribution, so the boot test checks both
 the module and the panel.
 
+The commissioning contract
+--------------------------
+
+``tests/commission.yaml`` says what the first boot asks, which login
+proves each password, which services and URLs answer, what the image must
+not hold, and what the two nodes of a pair must do (decision 0075). The
+manifest has no ``modes`` key, so the appliance takes the three modes of
+Core: simple, cloud simple and cloud advanced. On a pair the contract
+proves that a row written on the primary arrives on the replica, that a
+write on the primary finishes while the replica is stopped and that the
+fallback alert arrives, and that a promote and its return work, with the
+old primary following the new one. ``bin/keel-commission`` of
+``Keel-Linux/.github`` reads it to commission the template on BR1 and BR2,
+and the job ``commission / contract`` checks that it is there and valid.
+
 What it deliberately leaves out
 -------------------------------
 
