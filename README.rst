@@ -96,7 +96,10 @@ and accepts password authentication from anywhere. This layer listens on
 appliance above it is on the same machine. An appliance that really has
 remote clients opens the port, says who may connect and terminates TLS.
 That is a decision an appliance makes, not one a database layer makes for
-every appliance built on it.
+every appliance built on it. The Webmin firewall of the recipe
+(``WEBMIN_FW_TCP_INCOMING`` of the Makefile) opens only 22 and 12321 on the
+uplink. On a pair, keel opens 3306, a mesh port of the manifest, only on
+the WireGuard interface (issue #31).
 
 The socket units of ``mariadb-server`` are masked in the image, and the
 ``keel-mariadb`` package disables them in a preset and masks them too
