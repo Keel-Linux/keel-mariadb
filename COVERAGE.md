@@ -9,7 +9,7 @@ LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 | File | Test | Lines | Note |
 | --- | --- | --- | --- |
 | overlay/usr/lib/inithooks/lib/mariadb.sh | tests/mariadb.bats (13 tests) | 100 percent (43/43) under kcov | every function and every branch |
-| overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (14 tests) | 96.00 percent (24/25) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
+| overlay/usr/lib/inithooks/firstboot.d/35mysqlpass | tests/hook.bats (15 tests) | 96.43 percent (27/28) under kcov | the uncovered line is `done < <(bin/dbpass.py ...)`, a process substitution kcov attributes to no line; the loop itself is covered |
 | tests/lib/boot-test-lib.sh | tests/boot-test.bats (94 tests) | 100 percent (332/332) under kcov | argument parsing, address discovery, deadlines, the container marks, what pct create of Proxmox VE does to a tree (no machine id, its preset), the database, uplink, module, Webmin and diff verdicts (3306 on a wildcard address or answering on the uplink fails, #29), the node options, and the replication phase: the section each node's description gains, the verdicts on what keel did, the refusal that must happen when the replica holds data (a refusal for another reason quoted, the primary's silence among them), the step names a failed run ends with, and what a node is asked when its database never answered |
 | bin/keel-project-packages | tests/project-packages.bats (6 tests) | 100 percent (32/32) under kcov | inithooks, confconsole and keel are installed at apt's candidate, and the candidate is the Keel archive's in the suite of the track (KEEL_APT_TRACK); a version below the candidate, another source or an unknown track fails |
 | bin/keel-socket-wildcard | tests/socket-wildcard.bats (14 tests) | 100 percent (48/48) under kcov | Debian's mariadb.socket as shipped fails and passes once masked; disabled is not enough; every wildcard spelling of the port, the three Listen kinds, drop-ins and the empty value that clears the list, the precedence of etc over usr/lib, lib/systemd/system, another port, and the usage errors (#29) |
@@ -18,8 +18,8 @@ LXC as the acceptance test of a recipe, docs/org-plan.md section 1).
 | conf.d/main | the build | integration only | build time script, 0004 pragmatic limits |
 | tests/boot-test.sh | itself | integration only | the thin main of the acceptance test: keel and LXC as root |
 
-Total over the five measured shell files: **99.79 percent (479/480)**,
-150 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
+Total over the five measured shell files: **99.79 percent (482/483)**,
+151 bats tests. `tests/coverage.sh` fails below `COVERAGE_THRESHOLD`, which
 the workflow sets to 95, the lowest measured file. It is only ever raised
 (decision 0006).
 
@@ -28,7 +28,7 @@ the workflow sets to 95, the lowest measured file. It is only ever raised
      100.00  32/32  keel-project-packages
      100.00  43/43  mariadb.sh
      100.00  48/48  keel-socket-wildcard
-      96.00  24/25  35mysqlpass
+      96.43  27/28  35mysqlpass
      100.00  332/332  boot-test-lib.sh
 
 The topology of a run with several nodes is not measured here because it is
@@ -52,8 +52,9 @@ the administrative account, the hook proves it by connecting and fails
 when the database refuses it, a `MYSQL_PASS` in the conf is not a password
 and is ignored, a first boot nobody can answer (`INITHOOKS_UNATTENDED`,
 the rule 30rootpass and 31fqdn follow; keel-mariadb#24) with nothing
-declared asks nothing, says so with the name of the field to declare and
-finishes, whatever the hook's standard input is, the dialog is used only
+declared asks nothing, says so with the name of the field to declare,
+records the question for keel-init (and only says so on an inithooks
+without `console_deferred`) and finishes, whatever the hook's standard input is, the dialog is used only
 when somebody can answer the console, `APP_DB_USER` renames the account
 and a name that would need quoting is refused before anything runs, and
 the service is started and waited for before any password is set.
