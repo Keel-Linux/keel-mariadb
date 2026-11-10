@@ -55,6 +55,13 @@ the machine matches the description.
 - `instance.yaml`: the description the test container boots from. It
   declares `secrets.db_password` from a file, which is the point of the
   test.
+- `commission.yaml`: the commissioning contract (handbook decision 0075),
+  which `bin/keel-commission` of `Keel-Linux/.github` reads. It covers the
+  three modes that the manifest takes from Core: the single node passes
+  and the pair of cloud simple and cloud advanced.
+- `commission-core.yaml`: a copy of `tests/commission.yaml` of keel-core,
+  the contract of the Keel Core witness of the cloud advanced pass. Copy it
+  again when keel-core changes its contract.
 
 ## Unit tests and coverage
 

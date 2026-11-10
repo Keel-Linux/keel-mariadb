@@ -33,6 +33,16 @@ jobs:
     uses: keel-linux/.github/.github/workflows/test-shell.yml@main
     with:
       threshold: 95
+  commission:
+    # The commissioning contract, tests/commission.yaml (handbook decision
+    # 0075): the first boot questions, the login that proves each secret,
+    # the services, the URLs, what the image must not hold and the checks
+    # across the nodes of the cloud modes. This job only checks that the
+    # contract is there and valid; bin/keel-commission of keel-linux/.github
+    # runs it on BR1 and BR2, and no release goes out without a passing
+    # record. It produces the check "commission / contract".
+    runs-on: keel-host
+    uses: keel-linux/.github/.github/workflows/commission-contract.yml@main
   package:
     # Only on a pull request. require-changelog compares the two commits of
     # the pull request, which it reads from
