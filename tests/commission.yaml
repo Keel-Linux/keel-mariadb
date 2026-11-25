@@ -91,18 +91,11 @@ forbidden:
   # the test database of a MariaDB installation: common's conf/mysql
   # removes it, and an image must not carry one
   - {kind: mysql-database, name: test}
-# The web pages of the gallery (decision 0077): Webmin before and after the
-# login with the root secret, and its MariaDB module (webmin-mysql) after it.
-screenshots:
-  - name: webmin
-    port: 12321
-    url: /
-    login: {user_field: 'input[name=user]', user: root, password_field: 'input[name=pass]', secret: root, submit: 'button[type=submit]'}
-    # the dashboard of Webmin draws after the login (keel-postgresql, a
-    # busy VM of BR2, 2026-11-06)
-    wait: 20
-  # the browser keeps the Webmin session of the shot before
-  - {name: webmin-mysql, port: 12321, url: /mysql/, wait: 8}
+# No web screenshot: the one web interface of this image is Webmin, and
+# it answers only on the access network of the administrators (decision
+# 0098, keel-core 0.1.5). The runner reaches the machine from outside,
+# through the PVE host, where 12321 is closed. The url above proves that
+# Webmin answers on the machine.
 # The cloud modes (decision 0076): MariaDB is a replicating engine, the
 # pair of decisions 0031 and 0049, with semi-synchronous replication over
 # TLS and GTID. The prompts are the titles of the confconsole screens, the
