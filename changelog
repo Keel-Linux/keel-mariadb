@@ -1,3 +1,12 @@
+turnkey-mariadb-19.0 (13) turnkey; urgency=medium
+
+  * A new build with the packages that apt PR 134 put in the suite trixie
+    of the Keel archive: keel 0.23.118, confconsole 2.2.3+keel28,
+    inithooks 2.3.6+keel42, keel-core 0.1.5, keel-overlay-wireguard 0.1.1
+    and keel-overlay-crowdsec 0.1.1 (image round of 2026-11-27).
+
+ -- KeelLinux maintainers <admin@keellinux.org>  Fri, 27 Nov 2026 21:00:00 +0000
+
 turnkey-mariadb-19.0 (12) turnkey; urgency=medium
 
   * firstboot.d/35mysqlpass writes its question in the record of keel-init
